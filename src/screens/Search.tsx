@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router'
 import { CategoryTile, categories } from '@/components/cards/CategoryTile'
 import { Skeleton } from '@/components/ui/Skeleton'
-import { useLang } from '@/app/i18n'
+import { useLang, useT } from '@/app/i18n'
 import type { Category } from '@/data/places'
 import { StateView } from '@/components/states/States'
 import { Chip } from '@/components/ui/Chip'
@@ -137,13 +137,13 @@ export function SearchScreen() {
               ref={inputRef}
               value={text}
               onChange={(e) => { setText(e.target.value); set('q', e.target.value) }}
-              placeholder="Kainan, pasyalan, o lugar"
-              aria-label="Hanapin"
+              placeholder={t('Kainan, pasyalan, o lugar', 'Dining, attractions, or places')}
+              aria-label={t('Hanapin', 'Search')}
               enterKeyHint="search"
               className="h-full min-w-0 flex-1 bg-transparent text-[16px] text-fg outline-none placeholder:text-fg-2"
             />
             {text && (
-              <button type="button" aria-label="Burahin" onClick={() => { setText(''); set('q', null) }} className="flex h-8 w-8 items-center justify-center rounded-full bg-sunken text-fg-2 dark:bg-surface">
+              <button type="button" aria-label={t('Burahin', 'Clear')} onClick={() => { setText(''); set('q', null) }} className="flex h-8 w-8 items-center justify-center rounded-full bg-sunken text-fg-2 dark:bg-surface">
                 <X size={16} />
               </button>
             )}
@@ -165,16 +165,16 @@ export function SearchScreen() {
         </div>
         <div className="no-scrollbar -mx-4 mt-3 flex gap-2 overflow-x-auto px-4 md:mx-0 md:px-0">
           <Chip active={!!cat} onClick={() => setSheet('cat')} trailing={<ChevronDown size={15} />}>
-            {cat ?? 'Kategorya'}
+            {cat ?? t('Kategorya', 'Category')}
           </Chip>
           <Chip active={!!area} onClick={() => setSheet('area')} trailing={<ChevronDown size={15} />}>
-            {area ?? 'Lugar'}
+            {area ?? t('Lugar', 'Area')}
           </Chip>
           <Chip active={!!price} onClick={() => setSheet('price')} trailing={<ChevronDown size={15} />}>
-            {price ?? 'Presyo'}
+            {price ?? t('Presyo', 'Price')}
           </Chip>
           <Chip active={openNow} onClick={() => setOpenNow((v) => !v)}>
-            Bukas ngayon
+            {t('Bukas ngayon', 'Open now')}
           </Chip>
         </div>
       </header>
@@ -183,14 +183,14 @@ export function SearchScreen() {
         <div className="space-y-7 px-4 pt-4 md:px-0">
           {recent.length > 0 && (
             <section>
-              <h2 className="mb-1 text-h3">Mga huling hinanap</h2>
+              <h2 className="mb-1 text-h3">{t('Mga huling hinanap', 'Recent searches')}</h2>
               <ul>
                 {recent.map((r) => (
                   <li key={r} className="flex items-center border-b border-line">
                     <button onClick={() => commit(r)} className="flex h-12 flex-1 items-center gap-3 text-left text-body">
                       <Clock size={18} className="text-muted" /> {r}
                     </button>
-                    <button aria-label={`Alisin ang ${r}`} onClick={() => setRecent((x) => x.filter((y) => y !== r))} className="flex h-11 w-11 items-center justify-center text-muted">
+                    <button aria-label={t(`Alisin ang ${r}`, `Remove ${r}`)} onClick={() => setRecent((x) => x.filter((y) => y !== r))} className="flex h-11 w-11 items-center justify-center text-muted">
                       <X size={16} />
                     </button>
                   </li>
@@ -199,7 +199,7 @@ export function SearchScreen() {
             </section>
           )}
           <section>
-            <h2 className="mb-3 text-h3">Mga kategorya</h2>
+            <h2 className="mb-3 text-h3">{t('Mga kategorya', 'Categories')}</h2>
             <div className="grid grid-cols-4 gap-2 @2xl:grid-cols-8">
               {categories.map((c) => (
                 <CategoryTile key={c} category={c} onClick={() => set('cat', c)} />
@@ -221,11 +221,11 @@ export function SearchScreen() {
           ))}
         </div>
       ) : loadError ? (
-        <StateView expression="unsure" title="Hindi ma-load ang search" body="Hindi ma-access ang database. Subukan ulit mamaya." />
+        <StateView expression="unsure" title={t('Hindi ma-load ang search', "Couldn't load search")} body={t('Hindi ma-access ang database. Subukan ulit mamaya.', "Can't access the database. Try again later.")} />
       ) : results.length ? (
         <section className="px-4 pt-3 md:px-0">
           <p className="mb-3 text-caption text-fg-2" aria-live="polite">
-            {results.length} resulta · lahat ay verified
+            {results.length} {t('resulta · lahat ay verified', 'results · all verified')}
           </p>
           <div className="divide-y divide-line rounded-[20px] border border-line bg-surface px-3 shadow-card sm:px-5">
             {results.map((business) => (
@@ -236,9 +236,9 @@ export function SearchScreen() {
       ) : (
         <StateView
           expression="unsure"
-          title="Wala akong nahanap"
-          body={`Walang verified na lugar para sa "${q || cat || area || price}". Hindi ako manghuhula, kaya subukan ang ibang salita o tanggalin ang filter.`}
-          action="Tanggalin ang filter"
+          title={t('Wala akong nahanap', 'No matches found')}
+          body={t(`Walang verified na lugar para sa "${q || cat || area || price}". Hindi ako manghuhula, kaya subukan ang ibang salita o tanggalin ang filter.`, `No verified places for "${q || cat || area || price}". I don't guess, so try other words or remove a filter.`)}
+          action={t('Tanggalin ang filter', 'Clear filters')}
           onAction={() => {
             setParams({}, { replace: true })
             setArea(null)
@@ -248,7 +248,7 @@ export function SearchScreen() {
         />
       )}
 
-      <Sheet open={sheet === 'cat'} onClose={() => setSheet(null)} title="Kategorya">
+      <Sheet open={sheet === 'cat'} onClose={() => setSheet(null)} title={t('Kategorya', 'Category')}>
         <div className="grid grid-cols-4 gap-2">
           {categories.map((c) => (
             <CategoryTile
@@ -262,13 +262,14 @@ export function SearchScreen() {
           ))}
         </div>
       </Sheet>
-      <OptionSheet open={sheet === 'area'} title="Lugar" options={areaOptions} value={area} onPick={(v) => (setArea(v), setSheet(null))} onClose={() => setSheet(null)} />
-      <OptionSheet open={sheet === 'price'} title="Presyo" options={[...prices]} value={price} onPick={(v) => (setPrice(v), setSheet(null))} onClose={() => setSheet(null)} />
+      <OptionSheet open={sheet === 'area'} title={t('Lugar', 'Area')} options={areaOptions} value={area} onPick={(v) => (setArea(v), setSheet(null))} onClose={() => setSheet(null)} />
+      <OptionSheet open={sheet === 'price'} title={t('Presyo', 'Price')} options={[...prices]} value={price} onPick={(v) => (setPrice(v), setSheet(null))} onClose={() => setSheet(null)} />
     </main>
   )
 }
 
 function BusinessResult({ business }: { business: SearchBusiness }) {
+  const { t } = useLang()
   const [images, setImages] = useState<string[]>([])
   const [imageIndex, setImageIndex] = useState(0)
 
@@ -300,7 +301,7 @@ function BusinessResult({ business }: { business: SearchBusiness }) {
   return (
     <Link
       to={`/shop/${business.id}`}
-      aria-label={`Tingnan ang profile ng ${business.name}`}
+      aria-label={t(`Tingnan ang profile ng ${business.name}`, `View ${business.name} profile`)}
       className="group flex gap-3 py-4 transition-colors hover:bg-sunken/50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary sm:gap-4 sm:py-5"
     >
       <span className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-sunken dark:bg-elevated sm:h-14 sm:w-14">
@@ -325,7 +326,7 @@ function BusinessResult({ business }: { business: SearchBusiness }) {
           </span>
         </div>
         <p className="mt-1 truncate text-[13px] text-fg-2">
-          {business.business_type || 'Negosyo'}
+          {business.business_type || t('Negosyo', 'Business')}
           {business.price_range && <> <span aria-hidden>·</span> {business.price_range}</>}
         </p>
         <p className="mt-1 flex min-w-0 items-center gap-1 text-[13px] text-fg-2">
@@ -348,11 +349,12 @@ function BusinessResult({ business }: { business: SearchBusiness }) {
 }
 
 function OptionSheet({ open, title, options, value, onPick, onClose }: { open: boolean; title: string; options: string[]; value: string | null; onPick: (v: string | null) => void; onClose: () => void }) {
+  const t = useT()
   return (
     <Sheet open={open} onClose={onClose} title={title}>
       <div className="flex flex-wrap gap-2">
         <Chip active={!value} onClick={() => onPick(null)}>
-          Lahat
+          {t('Lahat', 'All')}
         </Chip>
         {options.map((o) => (
           <Chip key={o} active={value === o} onClick={() => onPick(o)}>
