@@ -87,7 +87,7 @@ export function Polaroid({
         />
       </div>
       <figcaption className="flex min-h-[24%] flex-col justify-center gap-0.5 px-[2%] py-[5%]" style={{ color: f.ink }}>
-        {caption && <span className="line-clamp-1 font-display text-[clamp(13px,9cqw,21px)] font-semibold leading-tight tracking-[-0.02em]">{caption}</span>}
+        {caption && <span className="line-clamp-1 font-display text-[clamp(13px,9cqw,21px)] font-semibold leading-tight">{caption}</span>}
         {(displayDate || place) && (
           <span className="line-clamp-1 font-display text-[clamp(10px,6.5cqw,14px)] leading-tight opacity-65">
             {[displayDate, place].filter(Boolean).join(' · ')}

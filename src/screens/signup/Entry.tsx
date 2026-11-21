@@ -51,7 +51,7 @@ export function Splash() {
       <motion.h1 initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }} className="relative mt-4 font-display text-[44px] font-bold tracking-tight text-white">
         Bitinary
       </motion.h1>
-      <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.4 }} className="relative font-display text-[17px] font-semibold text-ink">
+      <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.4 }} className="relative mt-4 px-6 text-center font-display text-[17px] font-semibold leading-relaxed text-ink">
         {t('Your Travel, Your Stories, Your Local Business Partner.', 'Your Travel, Your Stories, Your Local Business Partner.')}
       </motion.p>
       <div className="absolute bottom-[max(48px,env(safe-area-inset-bottom))] flex gap-2" role="status" aria-label={t('Naglo-load', 'Loading')}>
