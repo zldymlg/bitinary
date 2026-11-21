@@ -85,6 +85,11 @@
   --map-wall: #5a3420;
   --map-label: #d7b8a3;
   color-scheme: dark;
+
+  /* Dark surfaces need the light-on-dark ring; the base on-primary ring is for light surfaces. */
+  :focus-visible {
+    outline-color: var(--c-primary);
+  }
 }
 
 @theme inline {
@@ -216,7 +221,7 @@
     font-family: var(--font-display);
   }
   :focus-visible {
-    outline: 2px solid var(--c-primary);
+    outline: 2px solid var(--c-on-primary);
     outline-offset: 2px;
     border-radius: 10px;
   }

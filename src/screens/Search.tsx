@@ -140,7 +140,7 @@ export function SearchScreen() {
               placeholder="Kainan, pasyalan, o lugar"
               aria-label="Hanapin"
               enterKeyHint="search"
-              className="h-full min-w-0 flex-1 bg-transparent text-[16px] text-fg outline-none placeholder:text-fg-2"
+              className="h-full min-w-0 flex-1 bg-transparent text-[16px] text-fg placeholder:text-fg-2"
             />
             {text && (
               <button type="button" aria-label="Burahin" onClick={() => { setText(''); set('q', null) }} className="flex h-8 w-8 items-center justify-center rounded-full bg-sunken text-fg-2 dark:bg-surface">

@@ -1,4 +1,4 @@
-import { CalendarPlus, Clock, ExternalLink, Flag, MapPin, MoreHorizontal, Navigation, PenLine, Phone, Share, Star, Tag, Wallet } from 'lucide-react'
+import { CalendarPlus, Clock, ExternalLink, MapPin, MoreHorizontal, Navigation, PenLine, Phone, Share, Star, Tag, Wallet } from 'lucide-react'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import Dropdown from 'react-bootstrap/Dropdown'
 import Nav from 'react-bootstrap/Nav'
@@ -15,7 +15,7 @@ import { ReelCard } from '@/components/cards/ReelCard'
 import { BackButton } from '@/components/layout/TopBar'
 import { MiniMap } from '@/components/map/MiniMap'
 import { BizLogo, PersonAvatar } from '@/components/profile/Bits'
-import { PhotoViewer, ProfileSheet } from '@/components/profile/bs'
+import { PhotoViewer } from '@/components/profile/bs'
 import { IntroCard, MenuCard, PhotosCard } from '@/components/profile/Intro'
 import { CommentsSheet, PostCard } from '@/components/profile/PostCard'
 import { ReviewSheet, ReviewsTab } from '@/components/profile/Reviews'
@@ -80,7 +80,6 @@ function Profile({ place, embedded }: { place: Place; embedded?: boolean }) {
 
   const [addOpen, setAddOpen] = useState(false)
   const [share, setShare] = useState(false)
-  const [report, setReport] = useState(false)
   const [highlight, setHighlight] = useState<string | null>(null)
   const [viewer, setViewer] = useState<{ list: string[]; i: number } | null>(null)
 
@@ -113,9 +112,6 @@ function Profile({ place, embedded }: { place: Place; embedded?: boolean }) {
           <Dropdown.Item as="button" onClick={() => sharePlace()} className="flex min-h-11 items-center gap-3 rounded-[12px] px-3 text-[15px] font-medium">
             <Share size={18} className="text-link" /> I-share ang profile
           </Dropdown.Item>
-          <Dropdown.Item as="button" onClick={() => setReport(true)} className="flex min-h-11 items-center gap-3 rounded-[12px] px-3 text-[15px] font-medium">
-            <Flag size={18} className="text-link" /> Mag-ulat ng mali
-          </Dropdown.Item>
         </Dropdown.Menu>
       </Dropdown>
     </div>
@@ -146,6 +142,7 @@ function Profile({ place, embedded }: { place: Place; embedded?: boolean }) {
 
   const postsList = feed.posts.length ? (
     <div className="space-y-3">
+      <p className="text-caption text-fg-2">Sample data</p>
       {feed.posts.map((p) => (
         <PostCard key={p.id} post={p} place={place} feed={feed} onComments={() => setParam('comments', p.id, true)} onShare={() => sharePlace(`${place.name}: ${p.title ?? p.text}`)} onPhoto={openPhoto} />
       ))}
@@ -213,7 +210,7 @@ function Profile({ place, embedded }: { place: Place; embedded?: boolean }) {
       {/* Cover + logo */}
       <div className={cn('relative', !embedded && (fb ? 'mx-auto max-w-[1100px] px-6 pt-6' : 'md:mx-6 md:mt-6'))}>
         <div className={cn('relative overflow-hidden', embedded ? 'h-[160px]' : fb ? 'h-[340px] rounded-b-[24px] rounded-t-[24px]' : 'h-[210px] md:h-[320px] md:rounded-[28px]')}>
-          <img src={img(place.image, 1600, 700)} alt="" className="h-full w-full object-cover" />
+          <img src={img(place.image, 1600, 700)} alt="" width={1600} height={700} fetchPriority="high" className="h-full w-full object-cover" />
           <div className="absolute inset-0 bg-gradient-to-b from-black/35 via-transparent to-black/20" />
           <div className={cn('absolute inset-x-0 top-0 flex items-center justify-between px-4 pt-[max(12px,env(safe-area-inset-top))]', embedded && 'pr-16')}>
             {!embedded ? <BackButton /> : <span />}
@@ -315,23 +312,6 @@ function Profile({ place, embedded }: { place: Place; embedded?: boolean }) {
       <PhotoViewer photos={viewer?.list ?? []} index={viewer?.i ?? null} onClose={() => setViewer(null)} onIndex={(i) => setViewer((v) => v && { ...v, i })} />
       <AddToItinerarySheet place={place} open={addOpen} onClose={() => setAddOpen(false)} />
       <ShareSheet open={share} onClose={() => setShare(false)} title={place.name} />
-      <ProfileSheet open={report} onClose={() => setReport(false)} title="Mag-ulat ng mali">
-        <p className="mb-3 text-body text-fg-2">Ano ang mali sa {place.name}? Titingnan ito ng team at ng may-ari.</p>
-        <div className="space-y-2">
-          {['Mali ang oras', 'Mali ang presyo', 'Sarado na permanente', 'Mali ang lokasyon', 'Iba pa'].map((r) => (
-            <button
-              key={r}
-              onClick={() => {
-                setReport(false)
-                showToast({ text: 'Salamat! Ive-verify namin ito.', expression: 'celebrating' })
-              }}
-              className="flex h-12 w-full items-center rounded-2xl bg-sunken px-4 text-left text-body dark:bg-elevated"
-            >
-              {r}
-            </button>
-          ))}
-        </div>
-      </ProfileSheet>
     </main>
   )
 }

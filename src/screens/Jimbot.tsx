@@ -461,7 +461,7 @@ export function JimbotChat({ embedded }: { embedded?: boolean }) {
                     maxLength={MAX_INPUT}
                     placeholder="Itanong kay Jimbot…"
                     disabled={!online || switchingConversation}
-                    className="h-full min-w-0 flex-1 bg-transparent text-[16px] text-fg outline-none placeholder:text-fg-2"
+                    className="h-full min-w-0 flex-1 bg-transparent text-[16px] text-fg placeholder:text-fg-2"
                   />
                   <button
                     type="submit"

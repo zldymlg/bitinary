@@ -1,4 +1,4 @@
-import { Camera, Check, MapPin, Pencil, Search, Send, WifiOff, X } from 'lucide-react'
+import { Camera, Check, Pencil, Send, WifiOff, X } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import * as maplibregl from 'maplibre-gl'
 import type { Map as MapLibreMapInstance } from 'maplibre-gl'
@@ -255,8 +255,6 @@ export function MomentsMap() {
   const [mapFilter, setMapFilter] = useState<MapFilter>(params.get('f') === 'mine' ? 'mine' : 'all')
   const [galleryFilter, setGalleryFilter] = useState<GalleryFilter>(params.get('f') === 'mine' ? 'mine' : 'all')
   const [selected, setSelected] = useState<string | null>(null)
-  const [searching, setSearching] = useState(false)
-  const [query, setQuery] = useState('')
   const [viewer, setViewer] = useState<Moment | null>(null)
   const [dbMoments, setDbMoments] = useState<MomentRecord[]>([])
   const [loadingMoments, setLoadingMoments] = useState(true)
@@ -487,8 +485,6 @@ export function MomentsMap() {
     : [...(selectedCluster?.items ?? []), ...visible.filter((m) => !selectedCluster?.items.includes(m))].filter((m) =>
         galleryFilter === 'mine' ? m.mine : galleryFilter === 'trips' ? !!m.trip : true,
       )
-  const searchTargets: { label: string; sub: string }[] = []
-
   const deleteMoment = async (moment: Moment) => {
     if (!moment.mine || busyMomentId) return
     if (!window.confirm(t('I-delete ang Moment na ito? Hindi na ito mababawi.', 'Delete this Moment? This cannot be undone.'))) return
@@ -755,41 +751,6 @@ export function MomentsMap() {
             <Segmented tone="glass" label={t('Mode ng Moments', 'Moments mode')} value="map" onChange={(v) => v === 'camera' && navigate('/moments')} options={[{ value: 'camera', label: t('Camera', 'Camera') }, { value: 'map', label: t('Mapa', 'Map') }]} />
           </div>
           <PhaseTag phase="P3" />
-        </div>
-        <div className="pointer-events-auto relative mx-auto max-w-[520px]" data-map-ui>
-          {searching ? (
-            <div className="glass overflow-hidden rounded-[22px] shadow-float">
-              <div className="flex h-12 items-center gap-2 px-3.5">
-                <Search size={19} className="text-link" />
-                <input autoFocus value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t('Hanapin ang lugar sa mapa', 'Search places on the map')} className="h-full flex-1 bg-transparent text-[16px] text-fg outline-none placeholder:text-fg-2" aria-label={t('Hanapin sa mapa', 'Search the map')} />
-                <button aria-label={t('Isara', 'Close')} onClick={() => (setSearching(false), setQuery(''))} className="flex h-9 w-9 items-center justify-center rounded-full text-fg-2">
-                  <X size={18} />
-                </button>
-              </div>
-              <ul className="max-h-[260px] overflow-y-auto border-t border-line">
-                {searchTargets.slice(0, 6).map((t) => (
-                  <li key={t.label}>
-                    <button
-                      onClick={() => {
-                        setSearching(false)
-                        setQuery('')
-                      }}
-                      className="flex h-12 w-full items-center gap-3 px-4 text-left"
-                    >
-                      <MapPin size={17} className="text-link" />
-                      <span className="flex-1 truncate text-[15px] text-fg">{t.label}</span>
-                      <span className="text-caption text-fg-2">{t.sub}</span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : (
-            <button onClick={() => setSearching(true)} className="glass flex h-12 w-full items-center gap-2 rounded-full px-4 text-left shadow-float">
-              <Search size={19} className="text-link" />
-              <span className="text-[16px] text-fg-2">{t('Hanapin sa mapa', 'Search the map')}</span>
-            </button>
-          )}
         </div>
         <div className="no-scrollbar pointer-events-auto mx-auto flex max-w-[520px] gap-2 overflow-x-auto pb-2" data-map-ui>
           {([

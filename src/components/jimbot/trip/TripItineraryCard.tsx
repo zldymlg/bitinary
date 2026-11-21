@@ -214,7 +214,7 @@ export function TripItineraryCard({
               ? 'Over the budget you set.'
               : trip.budgetLimit != null
                 ? trip.unknownCount > 0
-                  ? 'May lumampas — some prices unconfirmed.'
+                  ? 'May lumampas, some prices unconfirmed.'
                   : 'Fits the known estimates.'
                 : 'No budget limit set.'}
           </p>
@@ -224,7 +224,7 @@ export function TripItineraryCard({
               className="mt-2 min-h-11 w-full rounded-full bg-[#ef7f27]/40 px-3 text-sm font-medium text-[#f5f0eb]"
               onClick={(e) => {
                 e.stopPropagation()
-                onRefine('Pasukin sa budget — gawing mas mura ang plan.')
+                onRefine('Pasukin sa budget, gawing mas mura ang plan.')
               }}
             >
               Make it fit
@@ -296,7 +296,7 @@ export function TripItineraryCard({
       <Sheet open={refineOpen} onClose={() => setRefineOpen(false)} title="Refine">
         <div className="flex flex-col gap-2">
           {[
-            ['Make it fit', 'Pasukin sa budget — gawing mas mura ang plan.'],
+            ['Make it fit', 'Pasukin sa budget, gawing mas mura ang plan.'],
             ['Cheaper', 'Pwede bang mas mura ang version nito?'],
             ['Shorter travel', 'Paikliin ang biyahe, mas malapit na stops.'],
             ['Swap a stop', `Palitan ang ${active.stops[0]?.name ?? 'isang stop'}, same area and budget.`],

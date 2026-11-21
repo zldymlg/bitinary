@@ -16,7 +16,7 @@ const variants: Record<Variant, string> = {
   outline: 'border border-line bg-surface text-fg',
 }
 const sizes: Record<Size, string> = {
-  sm: 'h-9 min-w-9 px-3.5 text-[14px] rounded-full gap-1.5',
+  sm: 'h-11 min-w-11 px-3.5 text-[14px] rounded-full gap-1.5',
   md: 'h-11 min-w-11 px-5 text-[15px] rounded-full gap-2',
   lg: 'h-14 px-6 text-[17px] rounded-[18px] gap-2.5',
 }

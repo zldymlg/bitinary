@@ -7,7 +7,6 @@ import {
   ImagePlus,
   Italic,
   List,
-  MapPin,
   Send,
   Sparkles,
   Video,
@@ -49,8 +48,6 @@ export function Composer() {
   const [video, setVideo] = useState<string | undefined>(existing?.video)
   const [videoFile, setVideoFile] = useState<File | null>(null)
   const [saving, setSaving] = useState(false)
-  const [duration, setDuration] = useState(0)
-  const [trim, setTrim] = useState<[number, number]>([0, 0])
   const [dealId, setDealId] = useState(
     existing?.dealId ?? (params.get("deal") ? d.deals[0]?.id : ""),
   )
@@ -59,10 +56,7 @@ export function Composer() {
   const [when, setWhen] = useState(() =>
     (existing?.at ?? new Date(Date.now() + 864e5).toISOString()).slice(0, 16),
   )
-  const [capEn, setCapEn] = useState(true)
-  const [capTl, setCapTl] = useState(true)
   const [helper, setHelper] = useState(false)
-  const [location, setLocation] = useState(d.business.address)
   const editor = useRef<HTMLDivElement>(null)
   const perm = getForcedState() === "permission"
 
@@ -434,10 +428,6 @@ export function Composer() {
                           muted
                           autoPlay
                           loop
-                          onLoadedMetadata={(e) => (
-                            setDuration(e.currentTarget.duration),
-                            setTrim([0, Math.min(e.currentTarget.duration, 30)])
-                          )}
                         />
                       ) : (
                         <div className="flex h-full flex-col items-center justify-center gap-2 p-3 text-center text-white/80">
@@ -483,77 +473,6 @@ export function Composer() {
                               }
                             }}
                           />
-                        </label>
-                      </div>
-                      <div>
-                        <p className="mb-1 font-display text-[14px] font-medium">
-                          {t("I-trim", "Trim")}
-                        </p>
-                        <div className="flex items-center gap-3 text-[14px]">
-                          <span className="w-12 font-display">
-                            {trim[0].toFixed(1)}s
-                          </span>
-                          <input
-                            type="range"
-                            aria-label={t("Simula", "Start")}
-                            min={0}
-                            max={duration || 30}
-                            step={0.1}
-                            value={trim[0]}
-                            disabled={!video}
-                            onChange={(e) =>
-                              setTrim([
-                                Math.min(Number(e.target.value), trim[1] - 1),
-                                trim[1],
-                              ])
-                            }
-                            className="flex-1 accent-[var(--c-primary)]"
-                          />
-                        </div>
-                        <div className="flex items-center gap-3 text-[14px]">
-                          <span className="w-12 font-display">
-                            {trim[1].toFixed(1)}s
-                          </span>
-                          <input
-                            type="range"
-                            aria-label={t("Dulo", "End")}
-                            min={0}
-                            max={duration || 30}
-                            step={0.1}
-                            value={trim[1]}
-                            disabled={!video}
-                            onChange={(e) =>
-                              setTrim([
-                                trim[0],
-                                Math.max(Number(e.target.value), trim[0] + 1),
-                              ])
-                            }
-                            className="flex-1 accent-[var(--c-primary)]"
-                          />
-                        </div>
-                      </div>
-                      <div className="flex flex-wrap gap-4">
-                        <label className="flex items-center gap-2 text-[15px]">
-                          <Toggle
-                            label="English captions"
-                            checked={capEn}
-                            onChange={setCapEn}
-                          />{" "}
-                          {t(
-                            "Auto-caption sa English",
-                            "Auto-captions in English",
-                          )}
-                        </label>
-                        <label className="flex items-center gap-2 text-[15px]">
-                          <Toggle
-                            label="Tagalog captions"
-                            checked={capTl}
-                            onChange={setCapTl}
-                          />{" "}
-                          {t(
-                            "Auto-caption sa Tagalog",
-                            "Auto-captions in Tagalog",
-                          )}
                         </label>
                       </div>
                     </div>
@@ -706,18 +625,6 @@ export function Composer() {
                     )}
                   </div>
                 </div>
-              )}
-              {type === "reel" && (
-                <label className="block">
-                  <span className="mb-1.5 flex items-center gap-1.5 font-display text-[14px] font-medium">
-                    <MapPin size={16} /> {t("Lokasyon", "Location")}
-                  </span>
-                  <input
-                    value={location}
-                    onChange={(e) => setLocation(e.target.value)}
-                    className={field}
-                  />
-                </label>
               )}
               {type !== "blog" && (
                 <label className="block">
