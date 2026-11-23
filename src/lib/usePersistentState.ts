@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
+import { isBizPreview } from './forced'
 
 const PREFIX = 'bitinary:'
 export const SYNC_EVENT = 'bitinary:sync'
 
 export function readStored<T>(key: string, fallback: T): T {
+  if (isBizPreview()) return fallback
   try {
     const raw = localStorage.getItem(PREFIX + key)
     return raw == null ? fallback : (JSON.parse(raw) as T)
@@ -17,6 +19,7 @@ export function usePersistentState<T>(key: string, initial: T) {
 
   // I-sync sa localStorage kapag nagbago, para manatili ang preference sa reload.
   useEffect(() => {
+    if (isBizPreview()) return
     try {
       localStorage.setItem(PREFIX + key, JSON.stringify(value))
       window.dispatchEvent(new Event(SYNC_EVENT))

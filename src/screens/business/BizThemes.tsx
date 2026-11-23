@@ -1,10 +1,7 @@
 import {
-  CalendarDays,
-  FileUp,
   Globe,
   ImagePlus,
   Music2,
-  Paperclip,
   Store,
   TriangleAlert,
   X,
@@ -35,7 +32,6 @@ import {
 } from "@/components/onboarding/BizWidgets"
 import {
   JimbotTip,
-  OfflineSaveBanner,
   PriceChips,
   Question,
 } from "@/components/onboarding/Kit"
@@ -57,9 +53,9 @@ import {
 import { cn } from "@/lib/cn"
 import { getForcedState } from "@/lib/forced"
 import { isGeoPoint } from "@/lib/geo"
-import { useOnline } from "@/lib/useOnline"
 import { validPH, formatPH, PhFlag } from "../signup/Signup"
 import { shrink } from "../personalize/TravelerThemes"
+import { BusinessVerificationSetup } from "@/biz/pages/BusinessVerification"
 
 type Errors = Record<string, string>
 
@@ -136,7 +132,7 @@ export type BizFormCtx = {
   business: BusinessProfile
   setBusiness: (
     b: BusinessProfile | ((b: BusinessProfile) => BusinessProfile),
-  ) => void
+  ) => void | Promise<{ error: string | null }>
   showToast: (t: {
     text: string
     expression?: "celebrating" | "pointing" | "sleeping" | "idea"
@@ -162,9 +158,16 @@ export function BizThemeForm({
   const setBusiness = ctx?.setBusiness ?? acc?.setBusiness
   if (!business || !setBusiness)
     throw new Error("Business setup requires its data provider.")
+  const persistBusiness: (
+    value: BusinessProfile | ((b: BusinessProfile) => BusinessProfile),
+  ) => Promise<{ error: string | null }> = async (value) => {
+    const result = ctx
+      ? await ctx.setBusiness(value)
+      : (acc?.setBusiness(value), undefined)
+    return result && result.error ? result : { error: null }
+  }
   const showToast = ctx?.showToast ?? store.showToast
   const { lang, t } = useLang()
-  const online = useOnline()
   const forced = getForcedState()
   const [b, setB] = useState<BusinessProfile>(() => business)
   const def = getBizThemesForType(b.type).find((x) => x.id === id)!
@@ -188,6 +191,8 @@ export function BizThemeForm({
       : {},
   )
   const [confirmLeave, setConfirmLeave] = useState(forced === "unsaved")
+  const [saving, setSaving] = useState(false)
+  const savingRef = useRef(false)
   const [dupDismissed, setDupDismissed] = useState(false)
   const [spec, setSpec] = useState("")
   const coverRef = useRef<HTMLInputElement>(null)
@@ -215,43 +220,66 @@ export function BizThemeForm({
     [b.name, forced],
   )
 
-  const save = () => {
+  if (id === "verify")
+    return <BusinessVerificationSetup embedded={embedded} onBack={onBack} onDone={onDone} />
+
+  const save = async () => {
     const e = validate(id, b, t)
     if (Object.keys(e).length) {
       setErrors(e)
       document
         .getElementById(`q-${Object.keys(e)[0]}`)
         ?.scrollIntoView({ behavior: "smooth", block: "center" })
-      return
+      return false
     }
+    if (savingRef.current) return false
+    savingRef.current = true
+    setSaving(true)
     const next = { ...b, status: { ...b.status, [id]: "done" as const } }
     if (id === "menu" && businessType)
       next.menu = normalizeMenuCategories(
         b.menu.filter((m) => m.name.trim()),
         businessType,
       )
-    if (id === "verify" && b.verification.method)
-      next.verification = { ...b.verification, status: "pending" }
-    setBusiness(next)
-    if (!online)
+    try {
+      const result = await persistBusiness(next)
+      if (result.error) throw new Error(result.error)
+      onDone("done")
+      return true
+    } catch (error) {
       showToast({
-        text: t(
-          "Naka-save sa device. Isi-sync pagbalik ng internet.",
-          "Saved on this device. Will sync when online.",
-        ),
-        expression: "sleeping",
+        text: error instanceof Error ? error.message : t("Hindi na-save ang mga pagbabago.", "Changes could not be saved."),
+        expression: "pointing",
       })
-    onDone("done")
+      return false
+    } finally {
+      savingRef.current = false
+      setSaving(false)
+    }
   }
-  const skip = () => {
-    setBusiness((x) => ({
-      ...x,
-      status: {
-        ...x.status,
-        [id]: x.status[id] === "done" ? "done" : "skipped",
-      },
-    }))
-    onDone("skipped")
+  const skip = async () => {
+    if (savingRef.current) return
+    savingRef.current = true
+    setSaving(true)
+    try {
+      const result = await persistBusiness((x) => ({
+        ...x,
+        status: {
+          ...x.status,
+          [id]: x.status[id] === "done" ? "done" : "skipped",
+        },
+      }))
+      if (result.error) throw new Error(result.error)
+      onDone("skipped")
+    } catch (error) {
+      showToast({
+        text: error instanceof Error ? error.message : t("Hindi na-save ang mga pagbabago.", "Changes could not be saved."),
+        expression: "pointing",
+      })
+    } finally {
+      savingRef.current = false
+      setSaving(false)
+    }
   }
   const back = () => (dirty ? setConfirmLeave(true) : onBack())
 
@@ -841,118 +869,7 @@ export function BizThemeForm({
         </Question>
       )
       break
-    case "verify": {
-      const v = b.verification
-      const setV = (patch: Partial<BusinessProfile["verification"]>) =>
-        set({ verification: { ...v, ...patch } })
-      body = (
-        <>
-          <Question
-            n={1}
-            title={t("Paano ka magve-verify?", "How will you verify?")}
-          >
-            <div className="space-y-2.5">
-              <SelectCard
-                selected={v.method === "upload"}
-                onClick={() => setV({ method: "upload" })}
-                icon={<FileUp size={24} />}
-                title={t("Mag-upload ng permit", "Upload a permit")}
-                body={t(
-                  "DTI o SEC, at Mayor’s permit",
-                  "DTI or SEC, and Mayor's permit",
-                )}
-              />
-              <SelectCard
-                selected={v.method === "onsite"}
-                onClick={() => setV({ method: "onsite" })}
-                icon={<CalendarDays size={24} />}
-                title={t(
-                  "Mag-iskedyul ng on-site check",
-                  "Schedule an on-site check",
-                )}
-                body={t("Bibisita ang team, libre", "The team visits, free")}
-              />
-            </div>
-          </Question>
-          {v.method === "upload" && (
-            <Question n={2} title={t("Mga dokumento", "Documents")}>
-              <div className="space-y-2">
-                {[
-                  t("DTI o SEC registration", "DTI or SEC registration"),
-                  t("Mayor's permit", "Mayor's permit"),
-                ].map((doc, i) => {
-                  const f = v.files[i]
-                  return (
-                    <label
-                      key={doc}
-                      className="flex cursor-pointer items-center gap-3 rounded-[18px] border border-line bg-surface p-3 dark:bg-elevated/50"
-                    >
-                      <span
-                        className={cn(
-                          "flex h-11 w-11 items-center justify-center rounded-[14px]",
-                          f
-                            ? "bg-ok-bg text-ok"
-                            : "bg-sunken text-link dark:bg-elevated",
-                        )}
-                      >
-                        <Paperclip size={20} />
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block font-display text-[15px] font-semibold">
-                          {doc}
-                        </span>
-                        <span className="block truncate text-[13px] text-fg-2">
-                          {f ??
-                            t(
-                              "PDF o larawan, hanggang 10 MB",
-                              "PDF or photo, up to 10 MB",
-                            )}
-                        </span>
-                      </span>
-                      <span className="font-display text-[14px] font-medium text-link">
-                        {f ? t("Palitan", "Replace") : t("Pumili", "Choose")}
-                      </span>
-                      <input
-                        type="file"
-                        accept="image/*,application/pdf"
-                        className="hidden"
-                        onChange={(e) =>
-                          e.target.files?.[0] &&
-                          setV({
-                            files: Object.assign([...v.files], {
-                              [i]: e.target.files[0].name,
-                            }),
-                          })
-                        }
-                      />
-                    </label>
-                  )
-                })}
-              </div>
-            </Question>
-          )}
-          {v.method === "onsite" && (
-            <Question n={2} title={t("Pumili ng petsa", "Pick a date")}>
-              <input
-                type="date"
-                value={v.onsiteDate ?? ""}
-                min={new Date().toISOString().slice(0, 10)}
-                onChange={(e) => setV({ onsiteDate: e.target.value })}
-                aria-label={t("Petsa", "Date")}
-                className={cn(inputBase, "border-line")}
-              />
-            </Question>
-          )}
-          <JimbotTip>
-            {t(
-              "Habang sinusuri, live ka pa rin. Pagka-approve, makukuha mo ang Verified badge, deals, boosts at reservations.",
-              "While we review, you stay live. Once approved you unlock the Verified badge, deals, boosts and reservations.",
-            )}
-          </JimbotTip>
-        </>
-      )
-      break
-    }
+
   }
 
   return (
@@ -966,19 +883,17 @@ export function BizThemeForm({
         tag={def.required ? "required" : "optional"}
         embedded={embedded}
         onBack={back}
-        onSkip={def.required ? undefined : skip}
-        onSave={save}
+        onSkip={def.required || saving ? undefined : () => void skip()}
+        onSave={() => void save()}
+        saveDisabled={saving}
         saveLabel={
-          dirty || !b.status[id] ? t("I-save", "Save") : t("Tapos na", "Done")
+          saving
+            ? t("Sine-save…", "Saving…")
+            : dirty || !b.status[id]
+              ? t("I-save", "Save")
+              : t("Tapos na", "Done")
         }
-        banner={
-          (!online || dupBanner) && (
-            <div className="space-y-3">
-              {!online && <OfflineSaveBanner />}
-              {dupBanner}
-            </div>
-          )
-        }
+        banner={dupBanner}
       >
         {body}
         {Object.keys(errors).length > 0 && (
@@ -1005,7 +920,9 @@ export function BizThemeForm({
           {
             label: t("I-save", "Save"),
             bold: true,
-            onClick: () => (setConfirmLeave(false), save()),
+            onClick: () => {
+              void save().then((saved) => saved && setConfirmLeave(false))
+            },
           },
           {
             label: t("Itapon ang binago", "Discard changes"),

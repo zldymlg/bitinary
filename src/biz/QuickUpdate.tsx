@@ -1,82 +1,112 @@
-import { Ban, CircleCheck, Clock3, PackageX, Save } from 'lucide-react'
-import { motion } from 'motion/react'
-import { useState, type ReactNode } from 'react'
+﻿import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/Button'
-import { cn } from '@/lib/cn'
+import { Toggle } from '@/components/ui/Toggle'
+import { useOnline } from '@/lib/useOnline'
+import { clearQuickUpdate, loadQuickUpdate, saveQuickUpdate } from './db/quickUpdates'
+import { emptyQuickUpdate, type QuickUpdateFields } from './quickUpdateState'
 import { useBiz } from './store'
 
-function BigToggle({ on, onClick, icon, label, tone }: { on: boolean; onClick: () => void; icon: ReactNode; label: string; tone: 'ok' | 'danger' | 'caution' }) {
-  const onCls = { ok: 'border-ok bg-ok-bg text-ok', danger: 'border-danger bg-danger-bg text-danger', caution: 'border-caution bg-caution-bg text-caution' }[tone]
-  return (
-    <motion.button
-      whileTap={{ scale: 0.96 }}
-      role="switch"
-      aria-checked={on}
-      onClick={onClick}
-      className={cn('flex min-h-[76px] flex-col items-start justify-between gap-1 rounded-[18px] border-2 p-3 text-left transition-colors', on ? onCls : 'border-line bg-bg text-fg-2 dark:bg-elevated')}
-    >
-      <span className="flex w-full items-center justify-between">
-        {icon}
-        <span className={cn('h-5 w-5 rounded-full border-2', on ? 'border-current bg-current' : 'border-line')} aria-hidden />
-      </span>
-      <span className="font-display text-[15px] font-semibold leading-tight">{label}</span>
-    </motion.button>
-  )
-}
+export function QuickUpdatePanel({ onDone, onCancel, onDirtyChange }: {
+  onDone: () => void
+  onCancel: () => void
+  onDirtyChange: (dirty: boolean) => void
+}) {
+  const { d, t, showToast } = useBiz()
+  const businessId = d.business.id
+  const online = useOnline()
+  const [draft, setDraft] = useState<QuickUpdateFields>(emptyQuickUpdate)
+  const [saved, setSaved] = useState<QuickUpdateFields>(emptyQuickUpdate)
+  const [hasUpdate, setHasUpdate] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [loadError, setLoadError] = useState(false)
+  const [saveError, setSaveError] = useState(false)
+  const [retry, setRetry] = useState(0)
 
-/** One-tap status toggles, today's special and quick price edits. Shared by the Overview card and the top-bar sheet. */
-export function QuickUpdatePanel({ compact, onDone }: { compact?: boolean; onDone?: () => void }) {
-  const { d, set, t, showToast } = useBiz()
-  const q = d.quick
-  const [special, setSpecial] = useState(q.special)
-  const [prices, setPrices] = useState<Record<string, string>>(() => Object.fromEntries(d.business.menu.map((m) => [m.id, m.price])))
-  const changedPrices = d.business.menu.some((m) => (prices[m.id] ?? m.price) !== m.price)
+  useEffect(() => {
+    if (!businessId) return
+    let active = true
+    setLoading(true)
+    setLoadError(false)
+    void loadQuickUpdate(businessId).then(({ data, error }) => {
+      if (!active) return
+      setDraft(data ?? emptyQuickUpdate)
+      setSaved(data ?? emptyQuickUpdate)
+      setHasUpdate(!!data)
+      setLoadError(!!error)
+      setLoading(false)
+    })
+    return () => { active = false }
+  }, [businessId, retry])
 
-  const toast = () => showToast({ text: t('Na-update!', 'Updated!'), expression: 'celebrating' })
-  const patch = (p: Partial<typeof q>) => {
-    set((x) => ({ ...x, quick: { ...x.quick, ...p, at: new Date().toISOString() } }))
-    toast()
+  const dirty = JSON.stringify(saved) !== JSON.stringify(draft)
+  useEffect(() => onDirtyChange(dirty), [dirty, onDirtyChange])
+
+  async function save(clear: boolean) {
+    if (!businessId || saving) return
+    setSaving(true)
+    setSaveError(false)
+    const { error } = await (clear ? clearQuickUpdate(businessId) : saveQuickUpdate(businessId, draft))
+    setSaving(false)
+    if (error) {
+      setSaveError(true)
+      return
+    }
+    showToast({ text: clear ? t('Inalis ang update.', 'Update cleared.') : t('Nai-publish ang update.', 'Update published.') })
+    onDone()
   }
-  const saveRest = () => {
-    set((x) => ({ ...x, quick: { ...x.quick, special, at: new Date().toISOString() }, business: { ...x.business, menu: x.business.menu.map((m) => ({ ...m, price: prices[m.id] ?? m.price })) } }))
-    toast()
-    onDone?.()
-  }
 
-  return (
-    <div>
-      <div className="grid grid-cols-2 gap-2.5">
-        <BigToggle on={q.state === 'open'} onClick={() => patch({ state: 'open' })} icon={<CircleCheck size={22} />} label={t('Bukas ngayon', 'Open today')} tone="ok" />
-        <BigToggle on={q.state === 'closed'} onClick={() => patch({ state: 'closed' })} icon={<Ban size={22} />} label={t('Sarado', 'Closed')} tone="danger" />
-        <BigToggle on={q.soldOut} onClick={() => patch({ soldOut: !q.soldOut })} icon={<PackageX size={22} />} label={t('Ubos na', 'Sold out')} tone="caution" />
-        <BigToggle on={q.longQueue} onClick={() => patch({ longQueue: !q.longQueue })} icon={<Clock3 size={22} />} label={t('Mahaba ang pila', 'Long queue')} tone="caution" />
-      </div>
-      <label className="mt-4 block">
-        <span className="mb-1.5 block font-display text-[14px] font-medium">{t('Espesyal ngayong araw', "Today's special")}</span>
-        <input value={special} onChange={(e) => setSpecial(e.target.value)} placeholder={t('hal. Sinigang na hipon', 'e.g. Shrimp sinigang')} className="h-12 w-full rounded-[14px] border border-line bg-bg px-4 text-[16px] outline-none focus:border-primary dark:bg-elevated" />
-      </label>
-      <div className="mt-4">
-        <p className="mb-1.5 font-display text-[14px] font-medium">{t('Mabilis na pag-edit ng presyo', 'Quick price edit')}</p>
-        <ul className="divide-y divide-line overflow-hidden rounded-[14px] border border-line">
-          {d.business.menu.slice(0, compact ? 4 : 6).map((m) => (
-            <li key={m.id} className="flex items-center gap-3 px-3 py-1.5">
-              <span className="min-w-0 flex-1 truncate text-[16px]">{m.name}</span>
-              <span className="font-display text-fg-2">₱</span>
-              <input
-                inputMode="decimal"
-                aria-label={t(`Presyo ng ${m.name}`, `Price of ${m.name}`)}
-                value={prices[m.id] ?? m.price}
-                onChange={(e) => setPrices((p) => ({ ...p, [m.id]: e.target.value.replace(/[^\d.]/g, '') }))}
-                className="h-10 w-20 rounded-[10px] border border-line bg-bg px-2 text-right font-display text-[16px] font-semibold outline-none focus:border-primary dark:bg-elevated"
-              />
-            </li>
-          ))}
-          {d.business.menu.length === 0 && <li className="px-3 py-3 text-[15px] text-fg-2">{t('Wala pang menu. Idagdag sa Impormasyon ng Negosyo.', 'No menu yet. Add it in Backgrounds.')}</li>}
-        </ul>
-      </div>
-      <Button block size="lg" className="mt-4" icon={<Save size={18} />} disabled={special === q.special && !changedPrices} onClick={saveRest}>
-        {t('I-save ang update', 'Save update')}
-      </Button>
+  if (!businessId || loading) return <p role="status">{t('Kinukuha ang update…', 'Loading update…')}</p>
+  if (loadError) return (
+    <div role="alert" className="space-y-3">
+      <p>{t('Hindi nakuha ang update.', 'Could not load the update.')}</p>
+      <Button variant="secondary" onClick={() => setRetry((value) => value + 1)}>{t('Subukan ulit', 'Retry')}</Button>
     </div>
+  )
+
+  const options = [
+    { value: 'regular', label: t('Regular na oras', 'Regular hours') },
+    { value: 'open', label: t('Bukas', 'Open') },
+    { value: 'closed', label: t('Sarado', 'Closed') },
+  ] as const
+  return (
+    <form onSubmit={(event) => { event.preventDefault(); void save(false) }} className="space-y-4">
+      <p className="text-sm text-fg-2">{t(
+        'Makikita ito sa pampublikong profile hanggang hatinggabi sa Pilipinas.',
+        'This appears on your public profile until midnight in the Philippines.',
+      )}</p>
+      <fieldset disabled={saving || !online} className="space-y-3">
+        <legend className="mb-2 font-semibold">{t('Katayuan ngayon', 'Current status')}</legend>
+        <div className="flex flex-wrap gap-2">
+          {options.map(({ value, label }) => (
+            <label key={value} className="flex min-h-11 items-center gap-2 rounded-xl border border-line px-3 text-sm">
+              <input type="radio" name="quick-status" checked={draft.status === value} onChange={() => setDraft({ ...draft, status: value })} />
+              {label}
+            </label>
+          ))}
+        </div>
+        <div className="flex items-center justify-between gap-3 rounded-xl bg-sunken px-3 py-2">
+          <span>{t('Ubos na', 'Sold out')}</span>
+          <Toggle label={t('Ubos na', 'Sold out')} checked={draft.sold_out} onChange={(sold_out) => setDraft({ ...draft, sold_out })} />
+        </div>
+        <div className="flex items-center justify-between gap-3 rounded-xl bg-sunken px-3 py-2">
+          <span>{t('Mahaba ang pila', 'Long queue')}</span>
+          <Toggle label={t('Mahaba ang pila', 'Long queue')} checked={draft.long_queue} onChange={(long_queue) => setDraft({ ...draft, long_queue })} />
+        </div>
+        <label className="block text-sm font-semibold">
+          {t('Espesyal ngayong araw', 'Today’s special')}
+          <input value={draft.special} maxLength={160} onChange={(event) => setDraft({ ...draft, special: event.target.value })} className="mt-2 min-h-11 w-full rounded-xl border border-line bg-bg px-3 font-normal" />
+        </label>
+      </fieldset>
+      {saveError && <p role="alert" className="text-sm text-danger">{t('Hindi na-save ang update. Subukan ulit.', 'Could not save the update. Try again.')}</p>}
+      {!online && <p role="status" className="text-sm text-fg-2">{t('Kumonekta para makapag-save.', 'Connect to save your update.')}</p>}
+      <div className="flex flex-wrap justify-end gap-2">
+        <Button type="button" variant="ghost" disabled={saving} onClick={onCancel}>{t('Kanselahin', 'Cancel')}</Button>
+        {hasUpdate && <Button type="button" variant="secondary" disabled={saving || !online} onClick={() => void save(true)}>{t('Alisin ang update', 'Clear update')}</Button>}
+        <Button type="submit" disabled={saving || !online || (draft.status === 'regular' && !draft.sold_out && !draft.long_queue && !draft.special.trim())}>
+          {saving ? t('Sine-save…', 'Saving…') : t('I-publish ang update', 'Publish update')}
+        </Button>
+      </div>
+    </form>
   )
 }

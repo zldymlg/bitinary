@@ -54,8 +54,9 @@ export function updateBusinessRow<T>(table: BusinessTable, businessId: string, i
 export function deleteBusinessRow(table: BusinessTable, businessId: string, id: string): Promise<DbResult<null>> {
   return execute(async () => {
     await assertBusinessOwner(businessId)
-    const { error } = await supabase.from(table).delete().eq('business_id', businessId).eq('id', id)
+    const { data, error } = await supabase.from(table).delete().eq('business_id', businessId).eq('id', id).select('id').maybeSingle()
     throwIfError(error)
+    if (!data) throw new Error('The requested business record could not be found.')
     return null
   })
 }

@@ -2,7 +2,7 @@ import { supabase } from '@/lib/supabase'
 import { execute, throwIfError, type DbResult } from './result'
 import { assertBusinessOwner } from './entity'
 
-export type ReviewRow = { id: string; business_id: string; author_id: string | null; stars: number; body: string; photo_urls: string[]; visited: boolean; checkin_at: string | null; checkin_via: 'QR' | 'code' | null; reply: string | null; created_at: string }
+export type ReviewRow = { id: string; business_id: string; author_id: string | null; stars: number; body: string; photo_urls: string[]; visited: boolean; checkin_at: string | null; checkin_via: 'QR' | 'code' | null; reply: string | null; hidden: boolean; created_at: string }
 export function loadReviews(businessId: string): Promise<DbResult<ReviewRow[]>> {
   return execute(async () => {
     await assertBusinessOwner(businessId)

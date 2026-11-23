@@ -1,22 +1,18 @@
-import { Link, Navigate, createBrowserRouter, useLocation, useRouteError } from 'react-router'
+import { Link, Navigate, createBrowserRouter, useLocation, useParams, useRouteError } from 'react-router'
 import { AppShell } from '@/components/layout/AppShell'
-import { AccountHome, BillingPage, HelpPage, PreferencesPage, ProfilePage, TeamPage } from '@/biz/pages/Account'
+import { AccountHome, HelpPage, PreferencesPage, ProfilePage } from '@/biz/pages/Account'
 import { Analytics } from '@/biz/pages/Analytics'
 import { Backgrounds } from '@/biz/pages/Backgrounds'
 import { Comments } from '@/biz/pages/Comments'
 import { Composer } from '@/biz/pages/Composer'
-import { BoostPage, DealsPage, QrKit, ReservationsPage } from '@/biz/pages/Growth'
-import { JimbotChat } from '@/biz/pages/JimbotChat'
 import { BizAuthCallback, BizContact, BizLanguage, BizLive, BizMethod, BizName, BizPasswordRecovery, BizReady, BizSetupHub, BizSummary, BizVerify, BizWelcome } from '@/biz/pages/Onboarding'
 import { Overview } from '@/biz/pages/Overview'
 import { Posts } from '@/biz/pages/Posts'
-import { CaseDetail, Cases, ReviewDetail, Reviews } from '@/biz/pages/Reviews'
-import { BizSearch, DirectoryDetail, HelpDetail, ProgramDetail } from '@/biz/pages/Search'
+import { ReviewDetail, Reviews } from '@/biz/pages/Reviews'
 import { BizScreenIndex } from '@/biz/ScreenIndex'
 import { BizRoot, BizShell } from '@/biz/Shell'
 import { Root } from '@/components/layout/Root'
 import { Account } from '@/screens/Account'
-import { BusinessDashboard, BusinessHub, BusinessLive, BusinessPreview } from '@/screens/business/Business'
 import { HomeFull, HomeV1 } from '@/screens/Home'
 import { ItineraryScreen } from '@/screens/Itinerary'
 import { JimbotScreen } from '@/screens/Jimbot'
@@ -43,6 +39,11 @@ import { ThemePage } from '@/dev/console/Theme'
 import { TeamPage as DevTeamPage } from '@/dev/console/Team'
 
 const basename = new URL(import.meta.env.BASE_URL, window.location.origin).pathname.replace(/\/$/, '') || undefined
+
+function LegacyBusinessSetup() {
+  const { id } = useParams()
+  return <Navigate to={id ? '/biz/setup/' + encodeURIComponent(id) : '/biz/setup'} replace />
+}
 
 function RouteErrorFallback() {
   const error = useRouteError()
@@ -113,7 +114,7 @@ export const router = createBrowserRouter(
       errorElement: <RouteErrorFallback />,
       children: [
         { index: true, element: <Navigate to="/biz/stats" replace /> },
-        { path: 'screens', Component: BizScreenIndex },
+        { path: 'screens', element: import.meta.env.DEV ? <BizScreenIndex /> : <Navigate to="/biz/stats" replace /> },
         { path: 'language', Component: BizLanguage },
         { path: 'welcome', Component: BizWelcome },
         { path: 'auth', Component: BizMethod },
@@ -125,6 +126,8 @@ export const router = createBrowserRouter(
         { path: 'signup/ready', Component: BizReady },
         { path: 'setup', Component: BizSetupHub },
         { path: 'setup/summary', Component: BizSummary },
+        { path: 'setup/menu', element: <Navigate to="/biz/stats/backgrounds#menu" replace /> },
+        { path: 'setup/photos', element: <Navigate to="/biz/stats/backgrounds#photos" replace /> },
         { path: 'setup/:id', Component: BizSetupHub },
         { path: 'live', Component: BizLive },
         {
@@ -133,27 +136,23 @@ export const router = createBrowserRouter(
             { path: 'stats', Component: Overview },
             { path: 'stats/analytics', Component: Analytics },
             { path: 'stats/backgrounds', Component: Backgrounds },
-            { path: 'jimbot', Component: JimbotChat },
-            { path: 'search', Component: BizSearch },
-            { path: 'search/business/:id', Component: DirectoryDetail },
-            { path: 'search/program/:id', Component: ProgramDetail },
-            { path: 'search/help/:id', Component: HelpDetail },
+            { path: 'jimbot', element: <Navigate to="/biz/stats" replace /> },
+            { path: 'search/*', element: <Navigate to="/biz/stats" replace /> },
             { path: 'content', Component: Posts },
             { path: 'content/new', Component: Composer },
             { path: 'content/edit/:id', Component: Composer },
             { path: 'content/comments', Component: Comments },
             { path: 'content/reviews', Component: Reviews },
-            { path: 'content/reviews/cases', Component: Cases },
-            { path: 'content/reviews/cases/:id', Component: CaseDetail },
+            { path: 'content/reviews/cases/*', element: <Navigate to="/biz/content/reviews" replace /> },
             { path: 'content/reviews/:id', Component: ReviewDetail },
             { path: 'account', Component: AccountHome },
             { path: 'account/profile', Component: ProfilePage },
-            { path: 'account/team', Component: TeamPage },
-            { path: 'account/qr', Component: QrKit },
-            { path: 'account/deals', Component: DealsPage },
-            { path: 'account/boost', Component: BoostPage },
-            { path: 'account/reservations', Component: ReservationsPage },
-            { path: 'account/billing', Component: BillingPage },
+            { path: 'account/team', element: <Navigate to="/biz/account" replace /> },
+            { path: 'account/qr', element: <Navigate to="/biz/account" replace /> },
+            { path: 'account/deals', element: <Navigate to="/biz/account" replace /> },
+            { path: 'account/boost', element: <Navigate to="/biz/account" replace /> },
+            { path: 'account/reservations', element: <Navigate to="/biz/account" replace /> },
+            { path: 'account/billing', element: <Navigate to="/biz/account" replace /> },
             { path: 'account/preferences', Component: PreferencesPage },
             { path: 'account/help', Component: HelpPage },
             { path: '*', element: <Navigate to="/biz/stats" replace /> },
@@ -181,12 +180,12 @@ export const router = createBrowserRouter(
         { path: 'signup/ready', Component: ReadyStep },
         { path: 'personalize', Component: PersonalizeHub },
         { path: 'personalize/:id', Component: PersonalizeHub },
-        { path: 'business', Component: BusinessDashboard },
-        { path: 'business/setup', Component: BusinessHub },
-        { path: 'business/setup/:id', Component: BusinessHub },
-        { path: 'business/hub', element: <Navigate to="/business/setup" replace /> },
-        { path: 'business/preview', Component: BusinessPreview },
-        { path: 'business/live', Component: BusinessLive },
+        { path: 'business', element: <Navigate to="/biz/stats" replace /> },
+        { path: 'business/setup/:id', element: <LegacyBusinessSetup /> },
+        { path: 'business/setup', element: <Navigate to="/biz/setup" replace /> },
+        { path: 'business/hub', element: <Navigate to="/biz/setup" replace /> },
+        { path: 'business/preview', element: <Navigate to="/biz/setup/summary" replace /> },
+        { path: 'business/live', element: <Navigate to="/biz/stats" replace /> },
         { path: 'reels/:id', Component: ReelsViewer },
         { path: 'screens', Component: ScreenIndex },
         { path: 'screens/components', Component: ComponentSheet },

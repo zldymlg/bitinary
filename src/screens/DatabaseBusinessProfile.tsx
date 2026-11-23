@@ -22,6 +22,8 @@ import { StateView } from "@/components/states/States"
 import { Skeleton } from "@/components/ui/Skeleton"
 
 import { resolveBusinessAsset } from "@/biz/db/assets"
+import { loadQuickUpdate } from "@/biz/db/quickUpdates"
+import { activeQuickUpdate, type QuickUpdate } from "@/biz/quickUpdateState"
 import { supabase } from "@/lib/supabase"
 
 type Business = {
@@ -182,6 +184,58 @@ const TABS: TabConfig[] = [
 
   { id: "photos", label: "Mga larawan" },
 ]
+
+function PublicQuickUpdate({ businessId }: { businessId: string }) {
+  const { t } = useLang()
+  const [update, setUpdate] = useState<QuickUpdate | null>(null)
+
+  useEffect(() => {
+    let active = true
+    let generation = 0
+    const refresh = () => {
+      const request = ++generation
+      void loadQuickUpdate(businessId).then(({ data }) => {
+        if (active && request === generation) setUpdate(data)
+      })
+    }
+    refresh()
+    window.addEventListener("focus", refresh)
+    return () => {
+      active = false
+      window.removeEventListener("focus", refresh)
+    }
+  }, [businessId])
+
+  useEffect(() => {
+    if (!update) return
+    const timeout = window.setTimeout(
+      () => setUpdate((current) => activeQuickUpdate(current)),
+      Math.max(0, Date.parse(update.expires_at) - Date.now()) + 10,
+    )
+    return () => window.clearTimeout(timeout)
+  }, [update])
+
+  const current = activeQuickUpdate(update)
+  if (!current) return null
+  const flags = [
+    current.status === "open" && t("Bukas ngayon", "Open today"),
+    current.status === "closed" && t("Sarado ngayong araw", "Closed today"),
+    current.sold_out && t("Ubos na", "Sold out"),
+    current.long_queue && t("Mahaba ang pila", "Long queue"),
+  ].filter(Boolean)
+  if (!flags.length && !current.special) return null
+
+  return (
+    <section aria-label={t("Update ng negosyo", "Business update")} className="mt-4 space-y-2 rounded-xl border border-line bg-sunken p-3 text-sm">
+      {flags.length > 0 && (
+        <ul className="flex flex-wrap gap-2">
+          {flags.map((flag) => <li key={String(flag)} className="rounded-full bg-surface px-3 py-1 font-semibold text-fg">{flag}</li>)}
+        </ul>
+      )}
+      {current.special && <p className="break-words"><strong>{t("Espesyal ngayong araw", "Today’s special")}</strong> · {current.special}</p>}
+    </section>
+  )
+}
 
 export function DatabaseBusinessProfile({ id }: { id: string }) {
   const navigate = useNavigate()
@@ -693,6 +747,7 @@ export function DatabaseBusinessProfile({ id }: { id: string }) {
               </span>
             )}
           </div>
+          <PublicQuickUpdate key={business.id} businessId={business.id} />
           <nav
             role="tablist"
             aria-label="Mga seksyon ng profile"

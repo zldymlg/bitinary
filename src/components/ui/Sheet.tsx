@@ -24,19 +24,47 @@ export function Sheet({
   const controls = useDragControls()
   const ref = useRef<HTMLDivElement>(null)
   const returnFocus = useRef<Element | null>(null)
+  const close = useRef(onClose)
+  close.current = onClose
 
   useEffect(() => {
     if (!open) return
+    const panel = ref.current
+    if (!panel) return
+    panel.dataset.activeSheet = 'true'
     returnFocus.current = document.activeElement
-    const t = setTimeout(() => ref.current?.focus(), 50)
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
-    window.addEventListener('keydown', onKey)
+    panel.focus()
+    const topSheet = () => Array.from(document.querySelectorAll('[data-active-sheet]')).at(-1) === panel
+    const onKey = (e: KeyboardEvent) => {
+      if (!topSheet()) return
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        close.current()
+      }
+      if (e.key !== 'Tab') return
+      const targets = Array.from(panel.querySelectorAll<HTMLElement>(
+        'button, a[href], input, select, textarea, summary, [tabindex]',
+      )).filter((el) => el.tabIndex >= 0 && !el.matches(':disabled') &&
+        el.getClientRects().length > 0 && (!(el instanceof HTMLInputElement) ||
+          el.type !== 'radio' || el.checked || !panel.querySelector('input[name="' + CSS.escape(el.name) + '"]:checked')))
+      const edge = e.shiftKey ? targets[0] : targets.at(-1)
+      if (!targets.length || document.activeElement === panel || document.activeElement === edge) {
+        e.preventDefault()
+        ;(e.shiftKey ? targets.at(-1) : targets[0] ?? panel)?.focus()
+      }
+    }
+    const containFocus = (e: FocusEvent) => {
+      if (topSheet() && e.target instanceof Node && !panel.contains(e.target)) panel.focus()
+    }
+    document.addEventListener('keydown', onKey)
+    document.addEventListener('focusin', containFocus)
     return () => {
-      clearTimeout(t)
-      window.removeEventListener('keydown', onKey)
+      delete panel.dataset.activeSheet
+      document.removeEventListener('keydown', onKey)
+      document.removeEventListener('focusin', containFocus)
       ;(returnFocus.current as HTMLElement | null)?.focus?.()
     }
-  }, [open, onClose])
+  }, [open])
 
   const onDragEnd = (_: unknown, info: PanInfo) => {
     if (info.offset.y > 120 || info.velocity.y > 600) onClose()

@@ -1,9 +1,9 @@
 import { ArrowLeft, BadgeCheck, CalendarCheck, Check, Download, FileText, RotateCcw, Search, ShieldCheck, X, ZoomIn } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
 import { useConsole, useCurrentDev } from '@/app/console'
 import { useStore } from '@/app/store'
-import { useSaveVerification, useVerifications, type VerificationRow } from '@/app/verification'
+import { signVerificationDocuments, useSaveVerification, useVerifications, type VerificationRow } from '@/app/verification'
 import { Button } from '@/components/ui/Button'
 import { Sheet } from '@/components/ui/Sheet'
 import { cn } from '@/lib/cn'
@@ -40,7 +40,7 @@ const DATE_FIELDS: { id: DateField; label: string }[] = [
   { id: 'submittedAt', label: 'Submitted' },
   { id: 'reviewedAt', label: 'Reviewed' },
   { id: 'permitValidUntil', label: 'Permit expiry' },
-  { id: 'dtiRegistered', label: 'DTI registered' },
+  { id: 'dtiRegistered', label: 'Registration date' },
 ]
 const day = (x?: string) => x?.slice(0, 10) ?? ''
 const ORDER: VerifyState[] = ['pending', 'needs-docs', 'expired', 'expiring', 'rejected', 'none', 'verified']
@@ -76,7 +76,7 @@ export function VerificationPage() {
       if ((from || to) && !dv) return false
       if (from && dv < from) return false
       if (to && dv > to) return false
-      if (needle && ![r.name, r.owner, r.v.dtiNo, r.v.permitNo].join(' ').toLowerCase().includes(needle)) return false
+      if (needle && ![r.name, r.owner, r.v.registrationNo, r.v.dtiNo, r.v.permitNo].join(' ').toLowerCase().includes(needle)) return false
       return true
     })
     return out.sort((a, b) => {
@@ -90,9 +90,9 @@ export function VerificationPage() {
   }, [all, statuses, city, dateField, from, to, q, sort])
 
   const exportCsv = () => {
-    const head = ['business', 'owner', 'city', 'status', 'method', 'dti_no', 'dti_registered', 'dti_valid_until', 'permit_no', 'permit_city', 'permit_issued', 'permit_valid_until', 'submitted', 'reviewed', 'reviewer', 'note']
+    const head = ['business', 'owner', 'city', 'status', 'method', 'registration_type', 'registration_no', 'registration_date', 'registration_valid_until', 'permit_no', 'permit_city', 'permit_issued', 'permit_valid_until', 'submitted', 'reviewed', 'reviewer', 'note']
     const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`
-    download('bitinary-verification.csv', [head.join(','), ...list.map((r) => [r.name, r.owner, r.city, r.state, r.v.method, r.v.dtiNo, r.v.dtiRegistered, r.v.dtiValidUntil, r.v.permitNo, r.v.permitCity, r.v.permitIssued, r.v.permitValidUntil, day(r.v.submittedAt), day(r.v.reviewedAt), r.v.reviewer, r.v.note].map(esc).join(','))].join('\n'), 'text/csv')
+    download('bitinary-verification.csv', [head.join(','), ...list.map((r) => [r.name, r.owner, r.city, r.state, r.v.method, r.v.registrationType ?? 'dti', r.v.registrationNo ?? r.v.dtiNo, r.v.dtiRegistered, r.v.dtiValidUntil, r.v.permitNo, r.v.permitCity, r.v.permitIssued, r.v.permitValidUntil, day(r.v.submittedAt), day(r.v.reviewedAt), r.v.reviewer, r.v.note].map(esc).join(','))].join('\n'), 'text/csv')
   }
   const SortTh = ({ k, label }: { k: DateField; label: string }) => (
     <th className="py-3 pr-3">
@@ -167,7 +167,7 @@ export function VerificationPage() {
                   <tr className="border-b border-line">
                     <th className="py-3 pl-5 pr-3">Business</th>
                     <th className="py-3 pr-3">DTI no.</th>
-                    <SortTh k="dtiRegistered" label="DTI registered" />
+                    <SortTh k="dtiRegistered" label="Registration date" />
                     <th className="py-3 pr-3">Permit no.</th>
                     <SortTh k="permitValidUntil" label="Permit valid until" />
                     <SortTh k="submittedAt" label="Submitted" />
@@ -189,7 +189,7 @@ export function VerificationPage() {
                           </span>
                         </span>
                       </td>
-                      <td className="py-3 pr-3 font-mono text-[13px]">{r.v.method === 'onsite' ? <Badge>On-site</Badge> : r.v.dtiNo || '—'}</td>
+                      <td className="py-3 pr-3 font-mono text-[13px]">{r.v.method === 'onsite' ? <Badge>On-site</Badge> : r.v.registrationNo ?? r.v.dtiNo ?? '—'}</td>
                       <td className="py-3 pr-3 text-fg-2">{fmtDate(r.v.dtiRegistered)}</td>
                       <td className="py-3 pr-3 font-mono text-[13px]">{r.v.permitNo || '—'}</td>
                       <td className={cn('py-3 pr-3', r.state === 'expired' ? 'font-semibold text-danger' : r.state === 'expiring' ? 'font-semibold text-caution' : 'text-fg-2')}>{fmtDate(r.v.permitValidUntil)}</td>
@@ -211,7 +211,7 @@ export function VerificationPage() {
                     <span className="min-w-0 flex-1">
                       <span className="block truncate font-display text-[15px] font-semibold">{r.name}</span>
                       <span className="block truncate text-[13px] text-fg-2">
-                        DTI {r.v.dtiNo || '—'} · Permit until {fmtDate(r.v.permitValidUntil)}
+                        {(r.v.registrationType ?? 'dti').toUpperCase()} {r.v.registrationNo ?? r.v.dtiNo ?? '—'} · Permit until {fmtDate(r.v.permitValidUntil)}
                       </span>
                       <span className="block text-[12px] text-fg-2">{r.v.submittedAt ? `Submitted ${fmtRel(r.v.submittedAt)}` : 'Not submitted'}</span>
                     </span>
@@ -238,6 +238,23 @@ function DocCard({ title, doc, onZoom }: { title: string; doc?: VerifyDoc; onZoo
       <p className="mb-2 font-display text-[15px] font-semibold">{title}</p>
       {!doc ? (
         <div className="flex h-36 items-center justify-center rounded-[14px] bg-sunken text-[14px] text-fg-2 dark:bg-elevated">Not uploaded</div>
+      ) : doc.signedUrl && doc.type.startsWith('image/') ? (
+        <button onClick={() => onZoom(doc)} className="group relative block w-full overflow-hidden rounded-[14px]" aria-label={`View ${doc.name}`}>
+          <img src={doc.signedUrl} alt={doc.name} className="h-36 w-full object-cover" />
+          <span className="absolute inset-0 flex items-center justify-center bg-black/0 text-white opacity-0 transition group-hover:bg-black/35 group-hover:opacity-100">
+            <ZoomIn size={26} />
+          </span>
+        </button>
+      ) : doc.signedUrl && doc.type === 'application/pdf' ? (
+        <a href={doc.signedUrl} target="_blank" rel="noreferrer" className="flex h-36 flex-col items-center justify-center gap-2 rounded-[14px] bg-sunken text-[14px] text-link dark:bg-elevated">
+          <FileText size={28} />
+          Open private PDF
+        </a>
+      ) : doc.signedUrl ? (
+        <a href={doc.signedUrl} target="_blank" rel="noreferrer" className="flex h-36 flex-col items-center justify-center gap-2 rounded-[14px] bg-sunken text-[14px] text-link dark:bg-elevated">
+          <FileText size={28} />
+          Open private document
+        </a>
       ) : doc.data ? (
         <button onClick={() => onZoom(doc)} className="group relative block w-full overflow-hidden rounded-[14px]" aria-label={`View ${doc.name}`}>
           <img src={doc.data} alt={doc.name} className="h-36 w-full object-cover" />
@@ -273,21 +290,32 @@ export function VerificationDetail() {
   const navigate = useNavigate()
   const idx = rows.findIndex((r) => r.placeId === placeId)
   const row = rows[idx]
+  const [signedRow, setSignedRow] = useState<{ placeId: string; v: Verification } | null>(null)
   const [zoom, setZoom] = useState<VerifyDoc | null>(null)
   const [decision, setDecision] = useState<Decision | null>(null)
   const [note, setNote] = useState('')
   const [reason, setReason] = useState(REJECT[0])
   const [missing, setMissing] = useState<DocKey[]>(['permit'])
   const [manual, setManual] = useState<Record<string, boolean>>({})
+  useEffect(() => {
+    let active = true
+    setSignedRow(null)
+    if (!row) return () => { active = false }
+    void signVerificationDocuments(row.placeId, row.v).then((v) => {
+      if (active) setSignedRow({ placeId: row.placeId, v })
+    })
+    return () => { active = false }
+  }, [row])
   if (loading) return <Panel><Empty title="Loading verification request…" /></Panel>
   if (!row) return <Panel><Empty title="Business not found" action={<Button onClick={() => navigate(BASE)}>Back to verification</Button>} /></Panel>
-  const v = row.v
+  const v = signedRow?.placeId === row.placeId ? signedRow.v : row.v
   const meta = info(row)
   const state = verifyState(v)
 
+  const registrationNo = v.registrationNo ?? v.dtiNo ?? ''
   const auto = [
-    { label: 'DTI no. has 7 digits', ok: /^\d{7}$/.test(v.dtiNo ?? '') },
-    { label: 'DTI registration is still valid', ok: daysUntil(v.dtiValidUntil) >= 0 },
+    { label: v.registrationType === 'sec' ? 'SEC registration no. is valid' : 'DTI no. has 7 digits', ok: v.registrationType === 'sec' ? /^[A-Za-z0-9][A-Za-z0-9 ./-]{3,29}$/.test(registrationNo) : /^\d{7}$/.test(registrationNo) },
+    ...(v.registrationType === 'sec' && !v.dtiValidUntil ? [] : [{ label: 'Registration is still valid', ok: daysUntil(v.dtiValidUntil) >= 0 }]),
     { label: 'Business permit is not expired', ok: daysUntil(v.permitValidUntil) >= 0 },
     { label: `Permit city matches the business city (${meta.city})`, ok: !!v.permitCity && (v.permitCity.toLowerCase().includes(meta.city.toLowerCase().split(' ')[0]) || meta.city.toLowerCase().includes(v.permitCity.toLowerCase().split(' ')[0])) },
     { label: 'Permit issued before it expires', ok: !!v.permitIssued && !!v.permitValidUntil && v.permitIssued < v.permitValidUntil },
@@ -383,7 +411,7 @@ export function VerificationDetail() {
           ) : (
             <Panel title="Documents">
               <div className="grid gap-3 sm:grid-cols-2">
-                <DocCard title="DTI certificate" doc={v.docs.dti} onZoom={setZoom} />
+                <DocCard title={`${(v.registrationType ?? 'dti').toUpperCase()} registration certificate`} doc={v.docs.dti} onZoom={setZoom} />
                 <DocCard title="Business permit" doc={v.docs.permit} onZoom={setZoom} />
               </div>
             </Panel>
@@ -391,9 +419,9 @@ export function VerificationDetail() {
           <Panel title="Details" pad={false}>
             <dl className="grid grid-cols-1 divide-y divide-line text-[14px] sm:grid-cols-2 sm:divide-y-0">
               {[
-                ['DTI Business Name No.', v.dtiNo],
-                ['DTI registered', fmtDate(v.dtiRegistered)],
-                ['DTI valid until', fmtDate(v.dtiValidUntil)],
+                [`${(v.registrationType ?? 'dti').toUpperCase()} registration no.`, v.registrationNo ?? v.dtiNo],
+                ['Registration date', fmtDate(v.dtiRegistered)],
+                ['Registration valid until', fmtDate(v.dtiValidUntil)],
                 ['Permit no.', v.permitNo],
                 ['Issuing city or town', v.permitCity],
                 ['Permit issued', fmtDate(v.permitIssued)],
@@ -453,7 +481,7 @@ export function VerificationDetail() {
       </div>
 
       <Sheet open={!!zoom} onClose={() => setZoom(null)} title={zoom?.name}>
-        {zoom?.data && <img src={zoom.data} alt={zoom.name} className="max-h-[70dvh] w-full rounded-[14px] object-contain" />}
+        {zoom?.signedUrl && zoom.type.startsWith('image/') ? <img src={zoom.signedUrl} alt={zoom.name} className="max-h-[70dvh] w-full rounded-[14px] object-contain" /> : zoom?.signedUrl && zoom.type === 'application/pdf' ? <iframe src={zoom.signedUrl} title={zoom.name} className="h-[70dvh] w-full rounded-[14px]" /> : zoom?.data ? <img src={zoom.data} alt={zoom.name} className="max-h-[70dvh] w-full rounded-[14px] object-contain" /> : null}
       </Sheet>
       <Sheet
         open={!!decision}

@@ -15,7 +15,7 @@ import { LangOverride, type Lang } from "@/app/i18n"
 
 import type { Expression } from "@/components/mascot/Jimbot"
 
-import { getForcedState } from "@/lib/forced"
+import { getForcedState, isBizPreview } from "@/lib/forced"
 
 import { AUTH_INTENT_KEY, AUTH_ROLE_KEY } from "@/lib/authFlow"
 
@@ -156,7 +156,6 @@ function persistedWorkspace(data: BizData) {
 }
 
 const WORKSPACE_CACHE_PREFIX = "bitinary-business-workspace:"
-const WORKSPACE_CACHE_TTL = 60_000
 
 type CachedWorkspace = {
   workspace: BizData
@@ -379,7 +378,9 @@ type ToastAction = {
 type Ctx = {
   d: BizData
 
-  set: (fn: (d: BizData) => BizData) => void
+  set: (fn: (d: BizData) => BizData) => Promise<{ error: string | null }>
+
+  setLocal: (fn: (d: BizData) => BizData) => Promise<void>
 
   lang: Lang
 
@@ -437,7 +438,8 @@ export function statusOf(b: BusinessProfile): BizStatus {
 
 export function BizProvider({ children }: { children: ReactNode }) {
   // Dito nilo-load at sini-sync ang workspace ng owner; tingnan ang error state bago mag-render ng dashboard.
-  const [data, setData] = useState<BizData>(initialData)
+  const preview = isBizPreview()
+  const [data, setData] = useState<BizData>(preview ? demoData : initialData)
 
   const [storedLang, setStoredLang] = usePersistentState<LangPref | null>(
     "biz-lang",
@@ -446,7 +448,7 @@ export function BizProvider({ children }: { children: ReactNode }) {
 
   const [toast, setToast] = useState<Toast | null>(null)
 
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(!preview)
 
   const [loadError, setLoadError] = useState<string | null>(null)
 
@@ -465,6 +467,7 @@ export function BizProvider({ children }: { children: ReactNode }) {
   const forced = getForcedState()
 
   useEffect(() => {
+    if (preview) return
     let active = true
 
     let hasCachedWorkspace = false
@@ -539,19 +542,16 @@ export function BizProvider({ children }: { children: ReactNode }) {
         setLoading(true)
       }
 
-      if (
-        cached &&
-        loadVersion === 0 &&
-        Date.now() - cached.savedAt < WORKSPACE_CACHE_TTL
-      ) {
-        return
-      }
-
+      const workspaceBeforeLoad = dataRef.current
       const result = await loadOwnedWorkspace()
 
       if (result.error) throw new Error(result.error)
 
       if (!active) return
+      if (dataRef.current !== workspaceBeforeLoad) {
+        setLoading(false)
+        return
+      }
 
       const session =
         result.data || businessUser
@@ -623,9 +623,10 @@ export function BizProvider({ children }: { children: ReactNode }) {
     return () => {
       active = false
     }
-  }, [loadVersion])
+  }, [loadVersion, preview])
 
   useEffect(() => {
+    if (preview) return
     const { data: authListener } = supabase.auth.onAuthStateChange(
       (event, session) => {
         if (event === "SIGNED_OUT") {
@@ -653,7 +654,7 @@ export function BizProvider({ children }: { children: ReactNode }) {
     )
 
     return () => authListener.subscription.unsubscribe()
-  }, [])
+  }, [preview])
 
   const view = useMemo<BizData>(() => {
     let v = data
@@ -719,49 +720,59 @@ export function BizProvider({ children }: { children: ReactNode }) {
     [lang],
   )
 
+  const setLocal = useCallback((fn: (d: BizData) => BizData) => {
+    const operation = saveQueue.current.then(() => {
+      const next = fn(dataRef.current)
+      dataRef.current = next
+      setData(next)
+      writeWorkspaceCache(workspaceUserIdRef.current, next)
+    })
+    saveQueue.current = operation
+    return operation
+  }, [])
+
   const set = useCallback((fn: (d: BizData) => BizData) => {
-    saveQueue.current = saveQueue.current
-      .then(async () => {
-        const previous = dataRef.current
+    const operation = saveQueue.current.then(async () => {
+      const previous = dataRef.current
+      const next = fn(previous)
 
-        const next = fn(previous)
-
-        const payload = persistedWorkspace(next)
-
-        if (
-          JSON.stringify(persistedWorkspace(previous)) ===
-          JSON.stringify(payload)
-        ) {
-          dataRef.current = next
-
-          setData(next)
-
-          writeWorkspaceCache(workspaceUserIdRef.current, next)
-
-          return
-        }
-
-        const { error } = await supabase.rpc("save_business_workspace", {
-          p_workspace: payload,
-        })
-
-        if (error) throw new Error(error.message)
-
+      if (
+        isBizPreview() ||
+        JSON.stringify(previous.business) === JSON.stringify(next.business)
+      ) {
         dataRef.current = next
-
         setData(next)
-
         writeWorkspaceCache(workspaceUserIdRef.current, next)
-      })
-      .catch((error: unknown) => {
-        setToast({
-          id: Date.now(),
-          text:
-            error instanceof Error
-              ? error.message
-              : "Business changes could not be saved.",
-        })
-      })
+        return { error: null }
+      }
+
+      const { data: savedBusinessId, error } = await supabase.rpc(
+        "save_business_workspace",
+        { p_workspace: persistedWorkspace(next) },
+      )
+
+      if (error) throw new Error(error.message)
+
+      const saved =
+        typeof savedBusinessId === "string" && !next.business.id
+          ? { ...next, business: { ...next.business, id: savedBusinessId } }
+          : next
+
+      dataRef.current = saved
+      setData(saved)
+      writeWorkspaceCache(workspaceUserIdRef.current, saved)
+      return { error: null }
+    }).catch((error: unknown) => {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Business changes could not be saved."
+      setToast({ id: Date.now(), text: message })
+      return { error: message }
+    })
+
+    saveQueue.current = operation.then(() => undefined)
+    return operation
   }, [])
 
   const showToast = useCallback(
@@ -812,6 +823,8 @@ export function BizProvider({ children }: { children: ReactNode }) {
     d: view,
 
     set,
+
+    setLocal,
 
     lang,
 

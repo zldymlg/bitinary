@@ -36,7 +36,7 @@ export type Post = {
   fb?: boolean
 }
 export type Comment = { id: string; postId: string; nick: string; authorId?: string; text: string; at: string; liked?: boolean; hidden?: boolean; reported?: string; reply?: string; blocked?: boolean; fresh?: boolean }
-export type Review = { id: string; nick: string; authorId?: string; stars: number; text: string; photos: string[]; at: string; checkin: { at: string; via: 'QR' | 'code' } | null; reply?: string; caseId?: string; fresh?: boolean }
+export type Review = { id: string; nick: string; authorId?: string; stars: number; text: string; photos: string[]; at: string; checkin: { at: string; via: 'QR' | 'code' } | null; reply?: string; caseId?: string; fresh?: boolean; hidden?: boolean }
 export type CaseStatus = 'received' | 'review' | 'info' | 'removed' | 'kept' | 'appealed'
 export type Case = {
   id: string

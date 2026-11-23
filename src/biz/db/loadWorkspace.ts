@@ -7,33 +7,21 @@ import { supabase } from "@/lib/supabase"
 import type { BizData } from "../store"
 
 import type {
-  Boost,
-  Branch,
-  Case,
   Comment,
-  Deal,
   Notif,
   Post,
-  ResRequest,
   Review,
-  Staff,
 } from "../seed"
 
 import {
-  loadBoosts,
-  loadBranches,
   loadComments,
-  loadDeals,
   loadHours,
   loadMenuItems,
   loadNotifications,
   loadOwnedBusiness,
   loadPhotos,
   loadPosts,
-  loadReservations,
-  loadReviewCases,
   loadReviews,
-  loadStaff,
 } from "./index"
 
 import { execute, type DbResult } from "./result"
@@ -63,18 +51,6 @@ export async function loadOwnedWorkspace(): Promise<DbResult<BizData | null>> {
 
       reviewsResult,
 
-      casesResult,
-
-      dealsResult,
-
-      boostsResult,
-
-      branchesResult,
-
-      staffResult,
-
-      reservationsResult,
-
       notificationsResult,
     ] = await Promise.all([
       loadHours(businessId),
@@ -88,18 +64,6 @@ export async function loadOwnedWorkspace(): Promise<DbResult<BizData | null>> {
       loadComments(businessId),
 
       loadReviews(businessId),
-
-      loadReviewCases(businessId),
-
-      loadDeals(businessId),
-
-      loadBoosts(businessId),
-
-      loadBranches(businessId),
-
-      loadStaff(businessId),
-
-      loadReservations(businessId),
 
       loadNotifications(),
     ])
@@ -116,18 +80,6 @@ export async function loadOwnedWorkspace(): Promise<DbResult<BizData | null>> {
       commentsResult,
 
       reviewsResult,
-
-      casesResult,
-
-      dealsResult,
-
-      boostsResult,
-
-      branchesResult,
-
-      staffResult,
-
-      reservationsResult,
 
       notificationsResult,
     ]
@@ -147,18 +99,6 @@ export async function loadOwnedWorkspace(): Promise<DbResult<BizData | null>> {
     const comments = commentsResult.data ?? []
 
     const reviews = reviewsResult.data ?? []
-
-    const cases = casesResult.data ?? []
-
-    const deals = dealsResult.data ?? []
-
-    const boosts = boostsResult.data ?? []
-
-    const branches = branchesResult.data ?? []
-
-    const staff = staffResult.data ?? []
-
-    const reservations = reservationsResult.data ?? []
 
     const notifications = notificationsResult.data ?? []
 
@@ -306,6 +246,8 @@ export async function loadOwnedWorkspace(): Promise<DbResult<BizData | null>> {
 
       at: comment.created_at,
 
+      fresh: Date.now() - new Date(comment.created_at).getTime() < 86_400_000,
+
       hidden: comment.hidden,
 
       reported: comment.reported_reason ?? undefined,
@@ -336,122 +278,10 @@ export async function loadOwnedWorkspace(): Promise<DbResult<BizData | null>> {
           : null,
 
       reply: review.reply ?? undefined,
-    }))
 
-    const mapCases: Case[] = cases.map((item) => ({
-      id: item.id,
+      fresh: Date.now() - new Date(review.created_at).getTime() < 86_400_000,
 
-      reviewId: item.review_id,
-
-      reason: item.reason,
-
-      explanation: item.explanation,
-
-      evidence: item.evidence_urls ?? [],
-
-      status: item.status as Case["status"],
-
-      createdAt: item.created_at,
-
-      decidedAt: item.decided_at ?? undefined,
-
-      timeline: Array.isArray(item.timeline)
-        ? item.timeline as Case["timeline"]
-        : [],
-
-      messages: Array.isArray(item.messages)
-        ? item.messages as Case["messages"]
-        : [],
-    }))
-
-    const mapDeals: Deal[] = deals.map((deal) => ({
-      id: deal.id,
-
-      kind: deal.kind,
-
-      item: deal.item,
-
-      percent: deal.percent ?? undefined,
-
-      minSpend: deal.min_spend ?? undefined,
-
-      addon: deal.addon ?? undefined,
-
-      start: deal.starts_at.slice(0, 10),
-
-      end: deal.ends_at.slice(0, 10),
-
-      from: deal.starts_at.slice(11, 16),
-
-      to: deal.ends_at.slice(11, 16),
-
-      limitPerDay: deal.limit_per_day,
-
-      limitTotal: deal.limit_total,
-
-      redemption: deal.redemption,
-
-      code: deal.code,
-
-      status: deal.status,
-
-      redeemed: { qr: deal.redeemed_qr, code: deal.redeemed_code },
-
-      views: deal.views,
-    }))
-
-    const mapBoosts: Boost[] = boosts.map((boost) => ({
-      id: boost.id,
-
-      postId: boost.post_id,
-
-      budget: boost.budget,
-
-      days: boost.days,
-
-      target: boost.target,
-
-      status: boost.status,
-
-      start: boost.starts_at,
-
-      results: { reach: boost.reach, clicks: boost.clicks, saves: boost.saves },
-    }))
-
-    const mapBranches: Branch[] = branches.map((branch) => ({
-      id: branch.id,
-
-      name: branch.name,
-
-      area: branch.area,
-    }))
-
-    const mapStaff: Staff[] = staff.map((person) => ({
-      id: person.email,
-
-      name: person.name,
-
-      email: person.email,
-
-      role: person.role,
-
-      status: person.status,
-
-      branch: person.branch_id ?? "",
-    }))
-
-    const mapReservations: ResRequest[] = reservations.map((request) => ({
-      id: request.id,
-
-      nick: request.guest_name,
-
-      party: request.party_size,
-
-      at: request.requested_at,
-
-      status: request.status,
-
-      note: request.note ?? undefined,
+      hidden: review.hidden,
     }))
 
     const mapNotifications: Notif[] = notifications.map((notification) => ({
@@ -521,11 +351,11 @@ export async function loadOwnedWorkspace(): Promise<DbResult<BizData | null>> {
 
       quick: { state: "open", soldOut: false, longQueue: false, special: "" },
 
-      branches: mapBranches,
+      branches: [],
 
-      activeBranch: mapBranches[0]?.id ?? "",
+      activeBranch: "",
 
-      staff: mapStaff,
+      staff: [],
 
       posts: mapPosts,
 
@@ -533,13 +363,13 @@ export async function loadOwnedWorkspace(): Promise<DbResult<BizData | null>> {
 
       reviews: mapReviews,
 
-      cases: mapCases,
+      cases: [],
 
-      deals: mapDeals,
+      deals: [],
 
-      boosts: mapBoosts,
+      boosts: [],
 
-      requests: mapReservations,
+      requests: [],
 
       reservations: { enabled: false, tables: 0, maxParty: 0, slot: 0 },
 

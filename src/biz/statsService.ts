@@ -1,140 +1,66 @@
-import { useEffect, useState, useCallback, useMemo } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
+import { buildDailyViews, utcDateKeys, type DailyViews } from './analyticsDates'
 
+export type { DailyViews } from './analyticsDates'
 export type BizStats = {
-  views: number[]
-  saves: number[]
-  trips: number[]
-  checkins: number[]
-  rating: number[]
-  ratingAll: number
+  dailyViews: DailyViews[]
+  ratingAll: number | null
   reviewCount: number
-  comments: number[]
-  dealCustomers: number[]
-  heat: number[][]
-  sources: { search: number; jimbot: number; posts: number; reels: number }
-  topSearches: { q: string; n: number; d: number; me: boolean }[]
-  topics: { k: string; pos: number; n: number }[]
   loading: boolean
   isDatabaseBacked: boolean
   error: string | null
 }
 
-const D = 864e5
-
-function zeroSeries(len = 60): number[] {
-  return Array.from({ length: len }, () => 0)
-}
-
-export function buildZeroStats(error: string | null = null): BizStats {
+export function buildZeroStats(error: string | null = null, isDatabaseBacked = false): BizStats {
   return {
-    views: zeroSeries(60),
-    saves: zeroSeries(60),
-    trips: zeroSeries(60),
-    checkins: zeroSeries(60),
-    rating: [],
-    ratingAll: 0,
+    dailyViews: utcDateKeys().map((date) => ({ date, views: 0 })),
+    ratingAll: null,
     reviewCount: 0,
-    comments: zeroSeries(60),
-    dealCustomers: zeroSeries(60),
-    heat: Array.from({ length: 7 }, () => zeroSeries(24)),
-    sources: { search: 0, jimbot: 0, posts: 0, reels: 0 },
-    topSearches: [],
-    topics: [],
     loading: false,
-    isDatabaseBacked: error === null,
+    isDatabaseBacked,
     error,
   }
 }
 
-/** Fetches business analytics from persisted Supabase records. */
+/** Fetches only owner-scoped profile views and aggregate visible-review data. */
 export async function fetchDatabaseStats(options: {
   businessId?: string
   live?: boolean
 }): Promise<BizStats> {
-  if (!options.live) {
-    return buildZeroStats()
-  }
+  if (!options.live) return buildZeroStats()
+
+  const businessId = options.businessId
+  if (!businessId) return buildZeroStats('This business has not been saved to the database yet.')
 
   try {
-    const bizId = options.businessId
-    if (!bizId) {
-      return buildZeroStats('This business has not been saved to the database yet.')
-    }
-
-    const [reviewsRes, dailyRes] = await Promise.all([
-      supabase.from('reviews').select('id, stars, visited, checkin_at, created_at').eq('business_id', bizId),
-      supabase.from('business_daily_stats').select('stat_date, views, saves, trip_adds, checkins, deal_customers').eq('business_id', bizId),
+    const now = new Date()
+    const dates = utcDateKeys(now)
+    const [summaryRes, dailyRes] = await Promise.all([
+      supabase.rpc('get_business_review_summary', { p_business_id: businessId }).maybeSingle(),
+      supabase
+        .from('business_daily_stats')
+        .select('stat_date, views')
+        .eq('business_id', businessId)
+        .gte('stat_date', dates[0])
+        .lte('stat_date', dates[dates.length - 1]),
     ])
-    if (reviewsRes.error) throw reviewsRes.error
+
+    if (summaryRes.error) throw summaryRes.error
     if (dailyRes.error) throw dailyRes.error
-
-    const now = Date.now()
-    const views = zeroSeries(60)
-    const saves = zeroSeries(60)
-    const trips = zeroSeries(60)
-    const checkins = zeroSeries(60)
-    const comments = zeroSeries(60)
-    const dealCustomers = zeroSeries(60)
-    const reviewsData = reviewsRes.data ?? []
-    const reviewCount = reviewsData.length
-    const totalStars = reviewsData.reduce((acc, r) => acc + (Number(r.stars) || 0), 0)
-    const ratingAll = reviewCount > 0 ? Number((totalStars / reviewCount).toFixed(1)) : 0
-
-    const sortedReviews = [...reviewsData].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
-    const ratingHistory: number[] = []
-    let rollingSum = 0
-    sortedReviews.forEach((r, idx) => {
-      rollingSum += Number(r.stars) || 0
-      ratingHistory.push(Number((rollingSum / (idx + 1)).toFixed(1)))
-    })
-
-    for (const r of reviewsData) {
-      if (r.visited || r.checkin_at) {
-        const dateVal = r.checkin_at || r.created_at
-        const daysAgo = Math.floor((now - new Date(dateVal).getTime()) / D)
-        if (daysAgo >= 0 && daysAgo < 60) {
-          checkins[59 - daysAgo]++
-        }
-      }
+    const summary = summaryRes.data as { review_count: unknown; average_rating: unknown } | null
+    if (!summary) throw new Error('No analytics access for this business.')
+    const reviewCount = Number(summary.review_count)
+    const rawRating = summary.average_rating
+    const averageRating = rawRating == null ? null : Number(rawRating)
+    if (!Number.isSafeInteger(reviewCount) || reviewCount < 0 || (averageRating != null && (!Number.isFinite(averageRating) || averageRating < 1 || averageRating > 5))) {
+      throw new Error('Invalid analytics summary response.')
     }
-
-    const heat = Array.from({ length: 7 }, () => zeroSeries(24))
-    for (const r of reviewsData) {
-      if (!r.visited && !r.checkin_at) continue
-      const date = new Date(r.checkin_at || r.created_at)
-      heat[(date.getDay() + 6) % 7][date.getHours()]++
-    }
-
-    const dailyData = dailyRes.data ?? []
-    for (const d of dailyData) {
-      const daysAgo = Math.floor((now - new Date(d.stat_date).getTime()) / D)
-      if (daysAgo >= 0 && daysAgo < 60) {
-        const i = 59 - daysAgo
-        views[i] = Math.max(views[i], Number(d.views) || 0)
-        saves[i] = Math.max(saves[i], Number(d.saves) || 0)
-        trips[i] = Math.max(trips[i], Number(d.trip_adds) || 0)
-        checkins[i] = Math.max(checkins[i], Number(d.checkins) || 0)
-        dealCustomers[i] = Math.max(dealCustomers[i], Number(d.deal_customers) || 0)
-      }
-    }
-
-    const finalRatingSeries = ratingHistory.length >= 8 ? ratingHistory.slice(-8) : ratingHistory.length > 0 ? ratingHistory : (ratingAll > 0 ? [ratingAll] : [])
 
     return {
-      views,
-      saves,
-      trips,
-      checkins,
-      rating: finalRatingSeries,
-      ratingAll,
+      dailyViews: buildDailyViews(dailyRes.data ?? [], now),
+      ratingAll: averageRating == null ? null : Number(averageRating.toFixed(1)),
       reviewCount,
-      comments,
-      dealCustomers,
-      heat,
-      sources: { search: 0, jimbot: 0, posts: 0, reels: 0 },
-      topSearches: [],
-      topics: [],
       loading: false,
       isDatabaseBacked: true,
       error: null,
@@ -145,64 +71,68 @@ export async function fetchDatabaseStats(options: {
   }
 }
 
-/**
- * Hook to read reactive statistics from the database.
- */
+/** Hook for reactive owner-scoped business statistics. */
 export function useBizStats(options?: {
   businessId?: string
   live?: boolean
 }): BizStats & { refresh: () => void } {
   const [stats, setStats] = useState<BizStats>(() => ({ ...buildZeroStats(), loading: true }))
-
+  const businessId = options?.businessId
   const live = options?.live
-  const bizId = options?.businessId
+  const generation = useRef(0)
+  const request = useRef(0)
+  const scope = useRef({ businessId, live })
+  scope.current = { businessId, live }
 
-  const refresh = useCallback(async () => {
-    const next = await fetchDatabaseStats({
-      businessId: bizId,
-      live,
+  const refresh = useCallback(() => {
+    const currentGeneration = generation.current
+    const currentRequest = ++request.current
+    setStats((current) => ({ ...current, loading: true, error: null }))
+    void fetchDatabaseStats({ businessId, live }).then((next) => {
+      if (scope.current.businessId === businessId && scope.current.live === live && generation.current === currentGeneration && request.current === currentRequest) setStats(next)
     })
-    setStats(next)
-  }, [bizId, live])
+  }, [businessId, live])
 
   useEffect(() => {
     let active = true
+    const currentGeneration = ++generation.current
+    setStats({ ...buildZeroStats(), loading: true })
+
     const loadStats = () => {
-      void fetchDatabaseStats({
-        businessId: bizId,
-        live,
-      }).then((res) => {
-        if (active) setStats(res)
+      const currentRequest = ++request.current
+      void fetchDatabaseStats({ businessId, live }).then((next) => {
+        if (active && scope.current.businessId === businessId && scope.current.live === live && generation.current === currentGeneration && request.current === currentRequest) setStats(next)
       })
     }
 
     loadStats()
     const channel =
-      live && bizId
+      live && businessId
         ? supabase
-            .channel(`business-daily-stats-${bizId}`)
+            .channel(`business-analytics-${businessId}`)
             .on(
               'postgres_changes',
-              {
-                event: '*',
-                schema: 'public',
-                table: 'business_daily_stats',
-                filter: `business_id=eq.${bizId}`,
-              },
+              { event: '*', schema: 'public', table: 'business_daily_stats', filter: `business_id=eq.${businessId}` },
+              loadStats,
+            )
+            .on(
+              'postgres_changes',
+              { event: '*', schema: 'public', table: 'reviews', filter: `business_id=eq.${businessId}` },
               loadStats,
             )
             .subscribe((status) => {
               if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-                console.error(`Live business statistics subscription failed: ${status}`)
+                console.error(`Live business analytics subscription failed: ${status}`)
               }
             })
         : null
 
     return () => {
       active = false
+      if (generation.current === currentGeneration) generation.current++
       if (channel) void supabase.removeChannel(channel)
     }
-  }, [bizId, live])
+  }, [businessId, live])
 
   return useMemo(() => ({ ...stats, refresh }), [stats, refresh])
 }

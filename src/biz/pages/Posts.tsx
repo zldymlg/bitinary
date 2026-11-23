@@ -1,15 +1,16 @@
-import { Bookmark, CalendarDays, Clapperboard, Eye, FileText, Heart, MessageCircle, MoreHorizontal, PenLine, Plus, Trash2 } from 'lucide-react'
+import { Clapperboard, FileText, Heart, MessageCircle, MoreHorizontal, PenLine, Plus, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router'
 import { IOSAlert } from '@/components/flow/IOSAlert'
 import { Button } from '@/components/ui/Button'
 import { cn } from '@/lib/cn'
-import { getForcedState } from '@/lib/forced'
-import { WD, longDate, num, time12 } from '../format'
+import { getForcedState, isBizPreview } from '@/lib/forced'
+import { longDate, time12 } from '../format'
 import type { Post } from '../seed'
 import { useBiz } from '../store'
 import { Card, PageHeader, Pill, StateBlock, SubTabs } from '../ui'
 import { BusinessAssetImage } from '../ui/BusinessAssetImage'
+import { deletePost } from '../db/posts'
 
 export function ContentTabs() {
   const { t, d } = useBiz()
@@ -19,7 +20,7 @@ export function ContentTabs() {
       items={[
         { to: '/biz/content', label: 'Posts' },
         { to: '/biz/content/comments', label: t('Mga Komento', 'Comments'), badge: d.comments.filter((c) => c.fresh && !c.reply && !c.hidden).length },
-        { to: '/biz/content/reviews', label: t('Mga Review', 'Reviews'), badge: d.reviews.filter((r) => !r.reply && !r.caseId).length },
+        { to: '/biz/content/reviews', label: t('Mga Review', 'Reviews'), badge: d.reviews.filter((r) => !r.hidden && !r.reply && !r.caseId).length },
       ]}
     />
   )
@@ -42,29 +43,17 @@ function PostRow({ p, onDelete }: { p: Post; onDelete: () => void }) {
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-1.5">
           <TypePill type={p.type} />
-          {p.status === 'scheduled' && <Pill tone="caution">{t('Naka-schedule', 'Scheduled')}</Pill>}
-          {p.status === 'draft' && <Pill>Draft</Pill>}
-          {p.fb && <Pill>Facebook</Pill>}
+          {p.status !== 'published' && <Pill>{t('Hindi pa nailalathala', 'Unpublished')}</Pill>}
         </div>
         <p className="mt-1 line-clamp-2 text-[16px] font-semibold leading-snug">{p.title ?? p.text}</p>
-        <p className="mt-0.5 text-[14px] text-fg-2">
-          {longDate(p.at, lang)} · {time12(p.at)}
-        </p>
         {p.status === 'published' && (
-          <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[14px] text-fg-2">
-            <li className="flex items-center gap-1">
-              <Eye size={15} /> {num(p.views)}
-            </li>
-            <li className="flex items-center gap-1">
-              <Heart size={15} /> {p.likes}
-            </li>
-            <li className="flex items-center gap-1">
-              <Bookmark size={15} /> {p.saves}
-            </li>
-            <li className="flex items-center gap-1">
-              <MessageCircle size={15} /> {p.comments}
-            </li>
-          </ul>
+          <>
+            <p className="mt-0.5 text-[14px] text-fg-2">{longDate(p.at, lang)} · {time12(p.at)}</p>
+            <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[14px] text-fg-2">
+              <li className="flex items-center gap-1"><Heart size={15} /> {p.likes}</li>
+              <li className="flex items-center gap-1"><MessageCircle size={15} /> {p.comments}</li>
+            </ul>
+          </>
         )}
       </div>
       <div className="relative">
@@ -86,63 +75,50 @@ function PostRow({ p, onDelete }: { p: Post; onDelete: () => void }) {
   )
 }
 
-function Calendar({ posts }: { posts: Post[] }) {
-  const { lang } = useBiz()
-  const navigate = useNavigate()
-  const now = new Date()
-  const first = new Date(now.getFullYear(), now.getMonth(), 1)
-  const offset = (first.getDay() + 6) % 7
-  const days = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()
-  const cells = Array.from({ length: Math.ceil((offset + days) / 7) * 7 }, (_, i) => i - offset + 1)
-  return (
-    <div>
-      <p className="mb-2 font-display text-[16px] font-semibold">{first.toLocaleString(lang === 'en' ? 'en-PH' : 'fil-PH', { month: 'long', year: 'numeric' })}</p>
-      <div className="grid grid-cols-7 gap-1 text-center text-[13px] text-fg-2">
-        {WD[lang].map((w) => (
-          <span key={w} className="py-1 font-display font-medium">
-            {w}
-          </span>
-        ))}
-        {cells.map((n, i) => {
-          const inMonth = n >= 1 && n <= days
-          const ps = inMonth ? posts.filter((p) => new Date(p.at).getDate() === n && new Date(p.at).getMonth() === now.getMonth()) : []
-          return (
-            <div key={i} className={cn('min-h-[72px] rounded-[12px] p-1 text-left', inMonth ? 'bg-sunken dark:bg-elevated' : 'opacity-0', n === now.getDate() && 'ring-2 ring-primary')}>
-              {inMonth && <span className="block px-1 font-display text-[13px] font-semibold text-fg">{n}</span>}
-              {ps.map((p) => (
-                <button key={p.id} onClick={() => navigate(`/biz/content/edit/${p.id}`)} className={cn('mt-0.5 block w-full truncate rounded-md px-1 text-left text-[11px] font-semibold', p.status === 'scheduled' ? 'bg-primary text-ink' : p.status === 'draft' ? 'bg-line text-fg' : 'bg-ok-bg text-ok')}>
-                  {time12(p.at)} {p.type === 'reel' ? 'Reel' : p.type === 'blog' ? 'Blog' : 'Post'}
-                </button>
-              ))}
-            </div>
-          )
-        })}
-      </div>
-    </div>
-  )
-}
-
-type View = 'published' | 'scheduled' | 'draft' | 'calendar'
+type View = 'published' | 'unpublished'
 
 export function Posts() {
-  const { d, set, t, showToast } = useBiz()
+  const { d, setLocal, t, showToast } = useBiz()
   const navigate = useNavigate()
   const [params, setParams] = useSearchParams()
-  const view = (params.get('v') as View) ?? 'published'
+  const requestedView = params.get('v')
+  const view: View = requestedView === 'unpublished' || requestedView === 'draft' || requestedView === 'scheduled'
+    ? 'unpublished'
+    : 'published'
   const [del, setDel] = useState<Post | null>(null)
+  const [deleting, setDeleting] = useState(false)
   const posts = getForcedState() === 'empty' ? [] : d.posts
-  const list = posts.filter((p) => p.status === view).sort((a, b) => +new Date(b.at) - +new Date(a.at))
-  const views: [View, string, number?][] = [
+  const list = posts.filter((p) => view === 'published' ? p.status === 'published' : p.status !== 'published').sort((a, b) => +new Date(b.at) - +new Date(a.at))
+  const views: [View, string, number][] = [
     ['published', t('Na-publish', 'Published'), posts.filter((p) => p.status === 'published').length],
-    ['scheduled', t('Naka-schedule', 'Scheduled'), posts.filter((p) => p.status === 'scheduled').length],
-    ['draft', 'Drafts', posts.filter((p) => p.status === 'draft').length],
-    ['calendar', t('Kalendaryo', 'Calendar')],
+    ['unpublished', t('Hindi pa nailalathala', 'Unpublished'), posts.filter((p) => p.status !== 'published').length],
   ]
+  const deleteSelected = async () => {
+    if (!del || deleting) return
+    const post = del
+    setDeleting(true)
+    try {
+      if (!isBizPreview()) {
+        if (!d.business.id) throw new Error('Save the business profile before deleting posts.')
+        const result = await deletePost(d.business.id, post.id)
+        if (result.error) throw new Error(result.error)
+      }
+      await setLocal((x) => ({ ...x, posts: x.posts.filter((item) => item.id !== post.id) }))
+      setDel(null)
+      showToast({ text: t('Nabura ang post', 'Post deleted'), expression: 'pointing' })
+    } catch (error) {
+      showToast({
+        text: error instanceof Error ? error.message : t('Hindi nabura ang post.', 'The post could not be deleted.'),
+        expression: 'unsure',
+      })
+    } finally {
+      setDeleting(false)
+    }
+  }
   return (
     <main>
       <PageHeader
         title={t('Nilalaman at Social', 'Blog and Social')}
-        phase="P3"
         tabs={<ContentTabs />}
         actions={
           <>
@@ -162,17 +138,12 @@ export function Posts() {
         <div role="tablist" className="no-scrollbar -mx-4 flex gap-2 overflow-x-auto px-4">
           {views.map(([v, l, n]) => (
             <button key={v} role="tab" aria-selected={view === v} onClick={() => setParams({ v }, { replace: true })} className={cn('flex min-h-11 shrink-0 items-center gap-2 rounded-full px-4 font-display text-[15px] font-medium', view === v ? 'bg-brown text-cream dark:bg-cream dark:text-brown' : 'bg-sunken text-fg-2 dark:bg-elevated')}>
-              {v === 'calendar' && <CalendarDays size={17} />}
               {l}
               {n != null && <span className="text-[13px] opacity-75">{n}</span>}
             </button>
           ))}
         </div>
-        {view === 'calendar' ? (
-          <Card>
-            <Calendar posts={posts} />
-          </Card>
-        ) : list.length === 0 ? (
+        {list.length === 0 ? (
           <Card>
             <StateBlock pose="camera" placeholder title={t('Wala pang post dito', 'No posts here yet')} body={t('Ang unang post ay mas madali kaysa inaakala mo. Tutulungan ka ni Jimbot.', 'Your first post is easier than you think. Jimbot will help you write it.')} action={t('Gumawa ng post', 'Create a post')} onAction={() => navigate('/biz/content/new?type=post')} />
           </Card>
@@ -196,12 +167,7 @@ export function Posts() {
             label: t('Burahin', 'Delete'),
             destructive: true,
             bold: true,
-            onClick: () => {
-              const p = del!
-              set((x) => ({ ...x, posts: x.posts.filter((y) => y.id !== p.id) }))
-              setDel(null)
-              showToast({ text: t('Nabura ang post', 'Post deleted'), expression: 'pointing', undo: () => set((x) => ({ ...x, posts: [p, ...x.posts] })) })
-            },
+            onClick: () => void deleteSelected(),
           },
         ]}
       />

@@ -1,13 +1,23 @@
 /** Business verification: DTI registration and Business (Mayor's) permit. */
 
-export type VerifyDoc = { name: string; size: number; type: string; /** shrunk image data URL; PDFs have none */ data?: string }
+export type VerifyDoc = {
+  name: string
+  size: number
+  type: string
+  storagePath?: string
+  signedUrl?: string
+  /** Legacy data URL; new verification documents stay in private storage. */
+  data?: string
+}
 export type VerifyStatus = 'none' | 'pending' | 'verified' | 'needs-docs' | 'rejected'
 export type VerifyEvent = { at: string; status: VerifyStatus; by: 'owner' | 'reviewer'; /** developer name for reviewer events */ byName?: string; note?: string }
 export type DocKey = 'dti' | 'permit'
 
 export type Verification = {
   method?: 'upload' | 'onsite'
-  /** DTI Business Name No., 7 digits */
+  registrationType?: 'dti' | 'sec'
+  registrationNo?: string
+  /** Legacy registration number field retained for reviewer reports. */
   dtiNo?: string
   dtiRegistered?: string
   dtiValidUntil?: string
@@ -86,12 +96,17 @@ export function validateVerification(v: Verification, t: T, only?: DocKey[]) {
   if (v.method !== 'upload') return e
   const need = (k: DocKey) => !only?.length || only.includes(k)
   if (need('dti')) {
-    if (!/^\d{7}$/.test(v.dtiNo ?? '')) e.dtiNo = t('7 numero ang DTI Business Name No.', 'The DTI Business Name No. has 7 digits.')
+    const registrationNo = (v.registrationNo ?? v.dtiNo ?? '').trim()
+    if (v.registrationType === 'sec') {
+      if (!/^[A-Za-z0-9][A-Za-z0-9 ./-]{3,29}$/.test(registrationNo)) e.dtiNo = t('Ilagay ang SEC registration number (4–30 letra o numero).', 'Enter a valid SEC registration number (4–30 characters).')
+    } else if (!/^\d{7}$/.test(registrationNo)) {
+      e.dtiNo = t('7 numero ang DTI Business Name No.', 'The DTI Business Name No. has 7 digits.')
+    }
     if (!v.dtiRegistered) e.dtiRegistered = t('Ilagay ang petsa ng rehistro.', 'Enter the registration date.')
     else if (daysUntil(v.dtiRegistered) > 0) e.dtiRegistered = t('Hindi puwedeng sa hinaharap.', "Can't be in the future.")
-    if (!v.dtiValidUntil) e.dtiValidUntil = t('Ilagay kung hanggang kailan.', 'Enter the valid-until date.')
-    else if (daysUntil(v.dtiValidUntil) < 0) e.dtiValidUntil = t('Expired na ang DTI registration. I-renew muna.', 'This DTI registration has expired. Renew it first.')
-    if (!v.docs.dti) e.dtiDoc = t('I-upload ang DTI certificate.', 'Upload the DTI certificate.')
+    if (!v.dtiValidUntil && v.registrationType !== 'sec') e.dtiValidUntil = t('Ilagay kung hanggang kailan.', 'Enter the valid-until date.')
+    else if (v.dtiValidUntil && daysUntil(v.dtiValidUntil) < 0) e.dtiValidUntil = t('Expired na ang registration. I-renew muna.', 'This registration has expired. Renew it first.')
+    if (!v.docs.dti) e.dtiDoc = t('I-upload ang registration certificate.', 'Upload the registration certificate.')
   }
   if (need('permit')) {
     const p = (v.permitNo ?? '').trim()
@@ -108,3 +123,30 @@ export function validateVerification(v: Verification, t: T, only?: DocKey[]) {
 }
 
 export const MAX_DOC = 10 * 1024 * 1024
+
+const VERIFICATION_FILE_EXTENSIONS: Record<string, string> = {
+  'application/pdf': 'pdf',
+  'image/bmp': 'bmp',
+  'image/gif': 'gif',
+  'image/heic': 'heic',
+  'image/heif': 'heif',
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/tiff': 'tiff',
+  'image/webp': 'webp',
+}
+
+export const VERIFICATION_FILE_ACCEPT = Object.keys(VERIFICATION_FILE_EXTENSIONS).join(',')
+
+export function verificationFileExtension(type: string) {
+  return VERIFICATION_FILE_EXTENSIONS[type]
+}
+
+export function isAllowedVerificationFile(file: Pick<File, 'size' | 'type'>) {
+  return file.size > 0 && file.size <= MAX_DOC && !!verificationFileExtension(file.type)
+}
+
+export function isVerificationObjectPath(path: string, businessId: string) {
+  if (!businessId || path.split('/').length !== 2 || path.split('/')[0] !== businessId) return false
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.(pdf|bmp|gif|heic|heif|jpg|png|tiff|webp)$/.test(path.split('/')[1])
+}

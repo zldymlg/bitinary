@@ -57,7 +57,6 @@ import { Button } from "@/components/ui/Button"
 
 import { Segmented } from "@/components/ui/Segmented"
 
-import { PhaseTag } from "@/components/ui/PhaseTag"
 
 import {
   REQUIRED_BIZ,
@@ -100,7 +99,7 @@ import { loadOwnedBusiness } from "../db/businesses"
 
 import { saveOwnerProfile } from "../db/ownerProfile"
 
-import { demoData, useBiz, type LangPref } from "../store"
+import { useBiz, type LangPref } from "../store"
 
 import { BizStatusChip } from "../ui"
 
@@ -180,7 +179,6 @@ export function BizLanguage() {
           <span className="font-display text-[14px] font-semibold">
             Language · Wika
           </span>
-          <PhaseTag phase="MVP" />
         </div>
         <h1 className="mt-1 text-title">
           {en ? "Choose your language" : "Pumili ng wika"}
@@ -237,7 +235,7 @@ export function BizLanguage() {
 /* ------------------------------ Welcome ------------------------------ */
 
 export function BizWelcome() {
-  const { d, t, set } = useBiz()
+  const { d, t } = useBiz()
 
   const navigate = useNavigate()
 
@@ -312,15 +310,6 @@ export function BizWelcome() {
         >
           {t("Mag-sign in", "Sign in")}
         </Button>
-        <button
-          onClick={() => (
-            set((x) => ({ ...demoData, langPref: x.langPref })),
-            navigate("/biz/stats")
-          )}
-          className="mt-1 min-h-11 w-full font-display text-[14px] font-medium text-fg-2 underline underline-offset-2"
-        >
-          {t("Subukan ang demo na negosyo", "Try the demo business")}
-        </button>
       </section>
     </main>
   )
@@ -1193,7 +1182,6 @@ export function BizSetupHub() {
           <BizStatusChip status={status} />
           <h1 className="mt-2 flex items-center gap-2 text-title">
             {b.name || t("I-setup ang negosyo mo", "Set up your business")}{" "}
-            <PhaseTag phase="MVP" />
           </h1>
           <p className="mt-1 text-body text-fg-2">
             {ready
@@ -1202,8 +1190,8 @@ export function BizSetupHub() {
                   "You can go live now! The rest is optional.",
                 )
               : t(
-                  `${4 - req} na lang bago ka makapag-live. Awtomatikong nase-save.`,
-                  `${4 - req} more before you can go live. Progress saves automatically.`,
+                  `${4 - req} na lang bago ka makapag-live. Pindutin ang Save sa bawat tema para ma-save ang mga pagbabago.`,
+                  `${4 - req} more before you can go live. Save each theme to keep your changes.`,
                 )}
           </p>
         </div>
@@ -1330,7 +1318,7 @@ export function BizSetupHub() {
         >
           {b.live
             ? t("Pumunta sa Statistika", "Go to Statistics")
-            : t("I-save bilang draft", "Save as draft")}
+            : t("Pumunta sa Pangkalahatan", "Go to Overview")}
         </Button>
       }
     />
@@ -1340,9 +1328,10 @@ export function BizSetupHub() {
 /* ------------------------------ Summary + go live ------------------------------ */
 
 export function BizSummary() {
-  const { d, set, t, lang } = useBiz()
+  const { d, set, t, lang, showToast } = useBiz()
 
   const navigate = useNavigate()
+  const [saving, setSaving] = useState(false)
 
   const b = d.business
 
@@ -1379,6 +1368,26 @@ export function BizSummary() {
       `${b.contactName || "—"} · +63 ${formatPH(b.mobile)}`,
     ],
   ]
+
+  const goLive = async () => {
+    if (saving || missing.length) return
+    setSaving(true)
+    const result = await set((x) => ({
+      ...x,
+      business: {
+        ...x.business,
+        live: true,
+        liveAt: new Date().toISOString(),
+      },
+      resume: null,
+    }))
+    setSaving(false)
+    if (result.error) {
+      showToast({ text: result.error, expression: "unsure" })
+      return
+    }
+    navigate("/biz/live", { replace: true })
+  }
 
   return (
     <div className="min-h-dvh bg-bg text-fg">
@@ -1454,21 +1463,10 @@ export function BizSummary() {
           size="lg"
           className="mt-5 !h-16 !text-[19px]"
           icon={<Rocket size={22} />}
-          disabled={missing.length > 0}
-          onClick={() => (
-            set((x) => ({
-              ...x,
-              business: {
-                ...x.business,
-                live: true,
-                liveAt: new Date().toISOString(),
-              },
-              resume: null,
-            })),
-            navigate("/biz/live", { replace: true })
-          )}
+          disabled={missing.length > 0 || saving}
+          onClick={() => void goLive()}
         >
-          {t("Simulan na", "Go live")}
+          {saving ? t("Sine-save…", "Saving…") : t("Simulan na", "Go live")}
         </Button>
         {missing.length > 0 && (
           <p className="mt-2 text-center text-[15px] font-semibold text-danger">
@@ -1487,14 +1485,23 @@ export function BizLive() {
   const { t, d } = useBiz()
 
   const navigate = useNavigate()
+  const verified = d.business.verification.status === "verified"
 
   return (
     <SuccessScreen
-      title={t("Live na ang negosyo mo!", "Your business is live!")}
-      chip={<BizStatusChip status="live" className="bg-white" />}
+      title={
+        verified
+          ? t("Live na ang negosyo mo!", "Your business is live!")
+          : t("Tapos na ang profile mo!", "Your profile is ready!")
+      }
+      chip={<BizStatusChip status={verified ? "verified" : "live"} className="bg-white" />}
       body={t(
-        `Makikita na ang ${d.business.name || "negosyo mo"}. Mag-verify para makuha ang badge at mas maraming tools.`,
-        `${d.business.name || "Your business"} is now visible. Verify to unlock the badge and more tools.`,
+        verified
+          ? `Live na sa traveler search ang ${d.business.name || "negosyo mo"}.`
+          : `${d.business.name || "Negosyo mo"} ay hindi pa lalabas sa traveler search hangga't hindi kumpleto ang verification.`,
+        verified
+          ? `${d.business.name || "Your business"} is live in traveler search.`
+          : `${d.business.name || "Your business"} will not appear in traveler search until verification is complete.`,
       )}
       actions={
         <>
@@ -1505,14 +1512,16 @@ export function BizLive() {
           >
             {t("Pumunta sa Pangkalahatan", "Go to Overview")}
           </Button>
-          <Button
-            block
-            variant="ghost"
-            className="!h-12"
-            onClick={() => navigate("/biz/stats/backgrounds#verify")}
-          >
-            {t("Mag-verify ngayon", "Verify now")}
-          </Button>
+          {!verified && (
+            <Button
+              block
+              variant="ghost"
+              className="!h-12"
+              onClick={() => navigate("/biz/stats/backgrounds#verify")}
+            >
+              {t("Mag-verify ngayon", "Verify now")}
+            </Button>
+          )}
         </>
       }
     />

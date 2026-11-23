@@ -1,23 +1,20 @@
 import {
-  CalendarDays,
   Clock,
-  FileUp,
+  ChevronLeft,
+  ChevronRight,
   Globe,
   Image as ImageIcon,
   ImagePlus,
   Info,
   ListChecks,
   MapPin,
-  Paperclip,
   Phone,
   Save,
-  ShieldCheck,
   Store,
-  Users,
   X,
 } from "lucide-react"
-import { useEffect, useState, type ReactNode } from "react"
-import { useLocation, useNavigate } from "react-router"
+import { useEffect, useRef, useState, type ReactNode } from "react"
+import { useLocation } from "react-router"
 import type { BizThemeId, BusinessProfile } from "@/app/account"
 import { ChoiceChip, SelectCard, inputBase } from "@/components/flow/Fields"
 import { Facebook, Instagram } from "@/components/icons/Brand"
@@ -41,13 +38,18 @@ import {
 } from "@/data/themes"
 import { cn } from "@/lib/cn"
 import { isGeoPoint } from "@/lib/geo"
+import { isBizPreview } from "@/lib/forced"
 import { shrink } from "@/screens/personalize/TravelerThemes"
 import { formatPH, validPH, PhFlag } from "@/screens/signup/Signup"
-import { longDate } from "../format"
 import { useBiz, useBusiness } from "../store"
-import { BizStatusChip, Card, PageHeader, Pill } from "../ui"
+import { Card, PageHeader } from "../ui"
 import { BusinessAssetImage } from "../ui/BusinessAssetImage"
+import { createPhoto, deletePhoto, loadPhotos, updatePhoto } from "../db/photos"
+import { updateBusiness } from "../db/businesses"
+import { uploadBusinessAsset } from "../db/assets"
+import { planPhotoSync } from "../db/ownerPersistence"
 import { StatsTabs } from "./Overview"
+import { BusinessVerificationCard } from "./BusinessVerification"
 
 type SectionId = BizThemeId
 const field = cn(inputBase, "border-line")
@@ -87,7 +89,7 @@ function Field({
   )
 }
 
-/** One editable section: keeps its own draft, shows Required/Optional, last updated and Save. */
+/** Each section keeps its draft until save or cancel. */
 function Section<K extends keyof BusinessProfile>({
   id,
   keys,
@@ -95,6 +97,8 @@ function Section<K extends keyof BusinessProfile>({
   icon,
   required,
   validate,
+  saveReady = true,
+  saveOverride,
   children,
 }: {
   id: SectionId
@@ -103,39 +107,76 @@ function Section<K extends keyof BusinessProfile>({
   icon: ReactNode
   required?: boolean
   validate?: (d: Pick<BusinessProfile, K>) => Record<string, string>
+  saveReady?: boolean
+  saveOverride?: (
+    draft: Pick<BusinessProfile, K>,
+    initialDraft: Pick<BusinessProfile, K>,
+    applyLocal: (overrides?: Partial<Pick<BusinessProfile, K>>) => Promise<void>,
+  ) => Promise<void>
   children: (
     d: Pick<BusinessProfile, K>,
     set: (p: Partial<Pick<BusinessProfile, K>>) => void,
     e: Record<string, string>,
   ) => ReactNode
 }) {
-  const { d, set: setData, t, lang, showToast } = useBiz()
+  const { d, set: setData, setLocal, t, showToast } = useBiz()
   const pick = () =>
     Object.fromEntries(
       keys.map((k) => [k, d.business[k]]),
     ) as Pick<BusinessProfile, K>
   const [draft, setDraft] = useState(pick)
+  const [initialDraft, setInitialDraft] = useState(pick)
   const [errors, setErrors] = useState<Record<string, string>>({})
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+  const dirty = JSON.stringify(draft) !== JSON.stringify(initialDraft)
+  const savedValues = JSON.stringify(pick())
   useEffect(() => {
-    setDraft(pick())
-  }, [d.business]) // eslint-disable-line react-hooks/exhaustive-deps
-  const dirty = JSON.stringify(draft) !== JSON.stringify(pick())
-  const save = () => {
+    if (dirty) return
+    const next = JSON.parse(savedValues) as Pick<BusinessProfile, K>
+    setDraft(next)
+    setInitialDraft(next)
+  }, [savedValues, dirty])
+  const save = async () => {
     const e = validate?.(draft) ?? {}
     setErrors(e)
     if (Object.keys(e).length) return
-    setData((x) => ({
+
+    const update = (x: typeof d, overrides: Partial<Pick<BusinessProfile, K>> = {}) => ({
       ...x,
       business: {
         ...x.business,
         ...draft,
+        ...overrides,
         status: { ...x.business.status, [id]: "done" },
       },
       updated: { ...x.updated, [id]: new Date().toISOString() },
-    }))
-    showToast({ text: t("Na-save!", "Saved!"), expression: "celebrating" })
+    })
+    setSaving(true)
+    setSaveError(null)
+    let saved = draft
+    try {
+      const applyLocal = async (overrides?: Partial<Pick<BusinessProfile, K>>) => {
+        await setLocal((x) => update(x, overrides))
+        saved = { ...draft, ...overrides }
+      }
+      if (saveOverride) {
+        await saveOverride(draft, initialDraft, applyLocal)
+      } else {
+        const result = await setData(update)
+        if (result.error) throw new Error(result.error)
+      }
+      setDraft(saved)
+      setInitialDraft(saved)
+      showToast({ text: t("Na-save!", "Saved!"), expression: "celebrating" })
+    } catch (error) {
+      setSaveError(
+        error instanceof Error ? error.message : t("Hindi na-save.", "Could not save."),
+      )
+    } finally {
+      setSaving(false)
+    }
   }
-  const updated = d.updated[id]
   return (
     <Card id={id} className="scroll-mt-24">
       <div className="mb-4 flex flex-wrap items-center gap-2">
@@ -144,35 +185,38 @@ function Section<K extends keyof BusinessProfile>({
         </span>
         <h2 className="text-h3">{title}</h2>
         {required ? <ReqTag /> : <OptTag />}
-        <span className="ml-auto text-[13px] text-fg-2">
-          {updated
-            ? t(
-                `Na-update: ${longDate(updated, lang)}`,
-                `Updated ${longDate(updated, lang)}`,
-              )
-            : t("Hindi pa naa-update", "Not updated yet")}
-        </span>
       </div>
-      <div className="space-y-4">
+      <fieldset disabled={saving} className="min-w-0 space-y-4">
         {children(
           draft,
           (p) => (setDraft((x) => ({ ...x, ...p })), setErrors({})),
           errors,
         )}
-      </div>
+      </fieldset>
       <div className="mt-5 flex items-center justify-end gap-2 border-t border-line pt-4">
+        {saveError && (
+          <span role="alert" className="mr-auto text-[14px] font-semibold text-danger">
+            {saveError}
+          </span>
+        )}
         {dirty && (
           <span className="mr-auto text-[14px] font-semibold text-caution">
             {t("May hindi pa nase-save", "Unsaved changes")}
           </span>
         )}
         {dirty && (
-          <Button variant="ghost" onClick={() => setDraft(pick())}>
+          <Button variant="ghost" disabled={saving} onClick={() => {
+            const next = pick()
+            setDraft(next)
+            setInitialDraft(next)
+            setSaveError(null)
+            setErrors({})
+          }}>
             {t("Kanselahin", "Cancel")}
           </Button>
         )}
-        <Button icon={<Save size={17} />} disabled={!dirty} onClick={save}>
-          {t("I-save", "Save")}
+        <Button icon={<Save size={17} />} disabled={!dirty || saving || !saveReady} onClick={() => void save()}>
+          {saving ? t("Sine-save…", "Saving…") : t("I-save", "Save")}
         </Button>
       </div>
     </Card>
@@ -180,11 +224,18 @@ function Section<K extends keyof BusinessProfile>({
 }
 
 export function Backgrounds() {
-  const { t, lang, status, set, d } = useBiz()
+  const { t, lang } = useBiz()
   const [b] = useBusiness()
+  const photoSnapshot = useRef<{
+    businessId: string
+    ids: string[]
+    cover?: { id: string; storage_path: string }
+  } | null>(null)
+  const uploadedPhotoPaths = useRef(new Map<string, string>())
+  const [photoSnapshotReady, setPhotoSnapshotReady] = useState(false)
+  const [photoSnapshotError, setPhotoSnapshotError] = useState<string | null>(null)
   const offering = getOfferingConfig(b.type)
   const { hash } = useLocation()
-  const navigate = useNavigate()
   useEffect(() => {
     if (hash)
       setTimeout(
@@ -195,10 +246,122 @@ export function Backgrounds() {
         150,
       )
   }, [hash])
+  useEffect(() => {
+    let active = true
+    photoSnapshot.current = null
+    setPhotoSnapshotError(null)
+    if (isBizPreview()) {
+      setPhotoSnapshotReady(true)
+      return () => { active = false }
+    }
+    if (!b.id) {
+      setPhotoSnapshotReady(false)
+      return () => { active = false }
+    }
+    setPhotoSnapshotReady(false)
+    void loadPhotos(b.id).then((result) => {
+      if (!active) return
+      if (result.error || !result.data) {
+        setPhotoSnapshotError(result.error ?? "The photo list could not be loaded.")
+      } else {
+        photoSnapshot.current = {
+          businessId: b.id!,
+          ids: result.data.map((photo) => photo.id),
+          cover: result.data.find((photo) => photo.is_cover),
+        }
+      }
+      setPhotoSnapshotReady(true)
+    })
+    return () => { active = false }
+  }, [b.id])
+
+  const savePhotos = async (
+    draft: Pick<BusinessProfile, "cover" | "photos">,
+    initialDraft: Pick<BusinessProfile, "cover" | "photos">,
+    applyLocal: (overrides?: Partial<Pick<BusinessProfile, "cover" | "photos">>) => Promise<void>,
+  ) => {
+    if (isBizPreview()) {
+      await applyLocal()
+      return
+    }
+    if (!b.id) throw new Error("Save the business profile before uploading photos.")
+    if (photoSnapshotError) throw new Error(photoSnapshotError)
+    if (photoSnapshot.current?.businessId !== b.id)
+      throw new Error("The existing photo list is still loading. Try again shortly.")
+
+    const uploadIfNeeded = async (path: string) => {
+      if (!/^(data:image\/|blob:)/i.test(path)) return path
+      const cached = uploadedPhotoPaths.current.get(path)
+      if (cached) return cached
+      const response = await fetch(path)
+      if (!response.ok) throw new Error("Could not read a selected business photo.")
+      const uploaded = await uploadBusinessAsset(b.id!, await response.blob(), "image", "photos")
+      uploadedPhotoPaths.current.set(path, uploaded)
+      return uploaded
+    }
+    const coverChanged = (draft.cover ?? "") !== (initialDraft.cover ?? "")
+    const [selectedCoverPath, galleryPaths] = await Promise.all([
+      coverChanged && draft.cover ? uploadIfNeeded(draft.cover) : Promise.resolve(initialDraft.cover ?? ""),
+      Promise.all(draft.photos.map(uploadIfNeeded)),
+    ])
+    const coverPath = selectedCoverPath
+    const loaded = await loadPhotos(b.id)
+    if (loaded.error || !loaded.data)
+      throw new Error(loaded.error ?? "The existing photo list could not be loaded.")
+    const current = loaded.data
+    const coverRow = current.find((photo) => photo.is_cover)
+    if (coverChanged) {
+      const originalCover = photoSnapshot.current.cover
+      if (
+        (coverRow?.id !== originalCover?.id || coverRow?.storage_path !== originalCover?.storage_path) &&
+        (coverRow?.storage_path ?? "") !== coverPath
+      ) {
+        throw new Error("The cover photo changed in another session. Reload before saving.")
+      }
+      if (coverPath) {
+        const result = coverRow
+          ? await updatePhoto(b.id, coverRow.id, { storage_path: coverPath, sort_order: -1 })
+          : await createPhoto(b.id, { storage_path: coverPath, is_cover: true, sort_order: -1 })
+        if (result.error || !result.data)
+          throw new Error(result.error ?? "The cover photo could not be saved.")
+      } else if (coverRow) {
+        const result = await deletePhoto(b.id, coverRow.id)
+        if (result.error) throw new Error(result.error)
+      }
+      const businessResult = await updateBusiness(b.id, { cover_url: coverPath || null })
+      if (businessResult.error || !businessResult.data)
+        throw new Error(businessResult.error ?? "The cover photo could not be saved.")
+    }
+
+    const plan = planPhotoSync(current, galleryPaths, photoSnapshot.current.ids)
+    const upserts = await Promise.all([
+      ...plan.keep.map(({ id, sort_order }) => updatePhoto(b.id!, id, { sort_order })),
+      ...plan.create.map((photo) => createPhoto(b.id!, photo)),
+    ])
+    const failedUpsert = upserts.find((result) => result.error)
+    if (failedUpsert?.error) throw new Error(failedUpsert.error)
+    const removals = await Promise.all(plan.remove.map((id) => deletePhoto(b.id!, id)))
+    const failedRemoval = removals.find((result) => result.error)
+    if (failedRemoval?.error) throw new Error(failedRemoval.error)
+    const refreshed = await loadPhotos(b.id)
+    if (refreshed.error || !refreshed.data)
+      throw new Error(refreshed.error ?? "The updated photo list could not be loaded.")
+    photoSnapshot.current = {
+      businessId: b.id,
+      ids: refreshed.data.map((photo) => photo.id),
+      cover: refreshed.data.find((photo) => photo.is_cover),
+    }
+    const savedPhotos = refreshed.data
+      .filter((photo) => !photo.is_cover)
+      .sort((a, b) => a.sort_order - b.sort_order)
+      .map((photo) => photo.storage_path)
+    await applyLocal({ cover: coverPath || undefined, photos: savedPhotos })
+    uploadedPhotoPaths.current.clear()
+  }
   const hints = Object.fromEntries(
     Object.entries(priceHint).map(([k, v]) => [k, v[lang === "en" ? 1 : 0]]),
   )
-  const index: [SectionId | "team", string][] = [
+  const index: [SectionId, string][] = [
     ["basics", t("Negosyo", "Basics")],
     ["location", t("Lokasyon", "Location")],
     ["hours", t("Oras", "Opening hours")],
@@ -208,20 +371,12 @@ export function Backgrounds() {
     ["about", t("Kuwento at specialty", "About and specialties")],
     ["online", "Online"],
     ["verify", t("Permit at verification", "Permits and verification")],
-    ["team", t("Branch at staff", "Branches and staff")],
   ]
-  const v = b.verification
-
   return (
     <main>
       <PageHeader
-        title={t("Statistika", "Statistics")}
-        phase="MVP"
+        title={t("Profile ng negosyo", "Business Profile")}
         tabs={<StatsTabs />}
-        sub={t(
-          "I-edit ang impormasyon ng negosyo mo. Bawat seksyon ay may sariling Save.",
-          "Edit your business information. Each section has its own Save.",
-        )}
       />
       <div className="grid gap-6 px-4 md:px-8 xl:grid-cols-[230px_1fr]">
         <nav
@@ -237,7 +392,7 @@ export function Backgrounds() {
               <span
                 className={cn(
                   "h-2 w-2 rounded-full",
-                  id !== "team" && b.status[(id as SectionId)] === "done"
+                  b.status[id] === "done"
                     ? "bg-ok"
                     : "bg-line",
                 )}
@@ -461,11 +616,13 @@ export function Backgrounds() {
             keys={["cover", "photos"]}
             title={t("Mga larawan", "Photos")}
             icon={<ImageIcon size={20} />}
+            saveReady={photoSnapshotReady || !!photoSnapshotError}
+            saveOverride={savePhotos}
           >
             {(x, s) => (
               <div className="grid gap-4 lg:grid-cols-[1.2fr_1fr]">
                 <Field label="Cover">
-                  <label className="relative flex aspect-[16/9] cursor-pointer items-center justify-center overflow-hidden rounded-[18px] border-2 border-dashed border-line bg-sunken dark:bg-elevated">
+                  <label className="relative flex aspect-[16/9] cursor-pointer items-center justify-center overflow-hidden rounded-[18px] border-2 border-dashed border-line bg-sunken focus-within:ring-2 focus-within:ring-primary focus-within:ring-offset-2 dark:bg-elevated">
                     {x.cover ? (
                       <BusinessAssetImage
                         src={x.cover}
@@ -481,7 +638,8 @@ export function Backgrounds() {
                     <input
                       type="file"
                       accept="image/*"
-                      className="hidden"
+                      className="sr-only"
+                      aria-label={t("Pumili ng cover photo", "Choose cover photo")}
                       onChange={async (ev) =>
                         ev.target.files?.[0] &&
                         s({ cover: await shrink(ev.target.files[0], 1200) })
@@ -508,6 +666,36 @@ export function Backgrounds() {
                         />
                         <button
                           type="button"
+                          disabled={i === 0}
+                          onClick={() => {
+                            const photos = [...x.photos]
+                            const previous = photos[i - 1]
+                            photos[i - 1] = photos[i]
+                            photos[i] = previous
+                            s({ photos })
+                          }}
+                          aria-label={t("Ilipat nang mas maaga", "Move earlier")}
+                          className="absolute bottom-1 left-1 flex h-8 w-8 items-center justify-center rounded-full bg-black/55 text-white disabled:opacity-40"
+                        >
+                          <ChevronLeft size={16} />
+                        </button>
+                        <button
+                          type="button"
+                          disabled={i === x.photos.length - 1}
+                          onClick={() => {
+                            const photos = [...x.photos]
+                            const next = photos[i + 1]
+                            photos[i + 1] = photos[i]
+                            photos[i] = next
+                            s({ photos })
+                          }}
+                          aria-label={t("Ilipat nang mas huli", "Move later")}
+                          className="absolute bottom-1 left-10 flex h-8 w-8 items-center justify-center rounded-full bg-black/55 text-white disabled:opacity-40"
+                        >
+                          <ChevronRight size={16} />
+                        </button>
+                        <button
+                          type="button"
                           onClick={() =>
                             s({ photos: x.photos.filter((_, j) => j !== i) })
                           }
@@ -519,13 +707,14 @@ export function Backgrounds() {
                       </div>
                     ))}
                     {x.photos.length < 6 && (
-                      <label className="flex aspect-square cursor-pointer items-center justify-center rounded-[12px] border-2 border-dashed border-line text-link">
+                      <label className="flex aspect-square cursor-pointer items-center justify-center rounded-[12px] border-2 border-dashed border-line text-link focus-within:ring-2 focus-within:ring-primary focus-within:ring-offset-2">
                         <ImagePlus size={22} />
                         <input
                           type="file"
                           accept="image/*"
                           multiple
-                          className="hidden"
+                          className="sr-only"
+                          aria-label={t("Magdagdag ng mga larawan", "Add photos")}
                           onChange={async (ev) =>
                             s({
                               photos: [
@@ -641,269 +830,8 @@ export function Backgrounds() {
             )}
           </Section>
 
-          <Card id="verify" className="scroll-mt-24">
-            <div className="mb-4 flex flex-wrap items-center gap-2">
-              <span className="flex h-10 w-10 items-center justify-center rounded-[12px] bg-sunken text-link dark:bg-elevated">
-                <ShieldCheck size={20} />
-              </span>
-              <h2 className="text-h3">
-                {t("Permit at verification", "Permits and verification")}
-              </h2>
-              <OptTag />
-              <span className="ml-auto">
-                <BizStatusChip status={status} />
-              </span>
-            </div>
-            {v.status === "needs-docs" && (
-              <p className="mb-3 rounded-[14px] bg-danger-bg px-4 py-3 text-[15px] font-semibold text-danger">
-                {t(
-                  "Malabo ang mayor’s permit. Mag-upload ng mas malinaw na kopya.",
-                  "The mayor's permit is unclear. Upload a clearer copy.",
-                )}
-              </p>
-            )}
-            <div className="grid gap-3 md:grid-cols-2">
-              <SelectCard
-                selected={v.method === "upload"}
-                onClick={() =>
-                  set((x) => ({
-                    ...x,
-                    business: {
-                      ...x.business,
-                      verification: {
-                        ...x.business.verification,
-                        method: "upload",
-                      },
-                    },
-                  }))
-                }
-                icon={<FileUp size={24} />}
-                title={t("Mag-upload ng permit", "Upload a permit")}
-                body={t(
-                  "DTI o SEC, at Mayor’s permit",
-                  "DTI or SEC, and Mayor's permit",
-                )}
-              />
-              <SelectCard
-                selected={v.method === "onsite"}
-                onClick={() =>
-                  set((x) => ({
-                    ...x,
-                    business: {
-                      ...x.business,
-                      verification: {
-                        ...x.business.verification,
-                        method: "onsite",
-                      },
-                    },
-                  }))
-                }
-                icon={<CalendarDays size={24} />}
-                title={t(
-                  "Mag-iskedyul ng on-site check",
-                  "Schedule an on-site check",
-                )}
-                body={t("Libre, bibisita ang team", "Free, the team visits")}
-              />
-            </div>
-            {v.method === "upload" && (
-              <ul className="mt-3 space-y-2">
-                {[
-                  t("DTI o SEC registration", "DTI or SEC registration"),
-                  t("Mayor's permit", "Mayor's permit"),
-                ].map((doc, i) => (
-                  <li key={doc}>
-                    <label className="flex min-h-14 cursor-pointer items-center gap-3 rounded-[16px] border border-line px-3 py-2">
-                      <Paperclip
-                        size={20}
-                        className={v.files[i] ? "text-ok" : "text-link"}
-                      />
-                      <span className="min-w-0 flex-1">
-                        <span className="block font-display text-[15px] font-semibold">
-                          {doc}
-                        </span>
-                        <span className="block truncate text-[14px] text-fg-2">
-                          {v.files[i] ??
-                            t(
-                              "PDF o larawan, hanggang 10 MB",
-                              "PDF or photo, up to 10 MB",
-                            )}
-                        </span>
-                      </span>
-                      {v.files[i] ? (
-                        <Pill tone="ok">{t("Na-upload", "Uploaded")}</Pill>
-                      ) : (
-                        <span className="font-display text-[14px] font-medium text-link">
-                          {t("Pumili", "Choose")}
-                        </span>
-                      )}
-                      <input
-                        type="file"
-                        accept="image/*,application/pdf"
-                        className="hidden"
-                        onChange={(ev) =>
-                          ev.target.files?.[0] &&
-                          set((x) => ({
-                            ...x,
-                            business: {
-                              ...x.business,
-                              verification: {
-                                ...x.business.verification,
-                                files: Object.assign(
-                                  [...x.business.verification.files],
-                                  { [i]: ev.target.files![0].name },
-                                ),
-                              },
-                            },
-                          }))
-                        }
-                      />
-                    </label>
-                  </li>
-                ))}
-              </ul>
-            )}
-            {v.method === "onsite" && (
-              <label className="mt-3 block">
-                <span className="mb-1.5 block font-display text-[14px] font-medium">
-                  {t("Petsa ng pagbisita", "Visit date")}
-                </span>
-                <input
-                  type="date"
-                  value={v.onsiteDate ?? ""}
-                  onChange={(ev) =>
-                    set((x) => ({
-                      ...x,
-                      business: {
-                        ...x.business,
-                        verification: {
-                          ...x.business.verification,
-                          onsiteDate: ev.target.value,
-                        },
-                      },
-                    }))
-                  }
-                  className={field}
-                />
-              </label>
-            )}
-            <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-line pt-4">
-              <Button
-                disabled={
-                  !v.method ||
-                  v.status === "verified" ||
-                  v.status === "pending" ||
-                  (v.method === "upload" &&
-                    v.files.filter(Boolean).length === 0) ||
-                  (v.method === "onsite" && !v.onsiteDate)
-                }
-                onClick={() =>
-                  set((x) => ({
-                    ...x,
-                    business: {
-                      ...x.business,
-                      verification: {
-                        ...x.business.verification,
-                        status: "pending",
-                      },
-                      status: { ...x.business.status, verify: "done" },
-                    },
-                    updated: { ...x.updated, verify: new Date().toISOString() },
-                  }))
-                }
-              >
-                {v.status === "pending"
-                  ? t("Naipadala na", "Submitted")
-                  : t("Ipadala para ma-verify", "Submit for verification")}
-              </Button>
-              <span className="text-[13px] text-fg-2">
-                {t("Demo:", "Demo:")}
-              </span>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() =>
-                  set((x) => ({
-                    ...x,
-                    business: {
-                      ...x.business,
-                      verification: {
-                        ...x.business.verification,
-                        status: "verified",
-                      },
-                    },
-                  }))
-                }
-              >
-                {t("Aprubahan", "Approve")}
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() =>
-                  set((x) => ({
-                    ...x,
-                    business: {
-                      ...x.business,
-                      verification: {
-                        ...x.business.verification,
-                        status: "needs-docs",
-                      },
-                    },
-                  }))
-                }
-              >
-                {t("Kulang ang dokumento", "Needs documents")}
-              </Button>
-            </div>
-          </Card>
+          <BusinessVerificationCard />
 
-          <Card
-            id="team"
-            title={t("Branch at staff", "Branches and staff")}
-            icon={<Users size={20} />}
-            className="scroll-mt-24"
-            phase="MVP"
-            action={
-              <Button
-                variant="secondary"
-                onClick={() => navigate("/biz/account/team")}
-              >
-                {t("Pamahalaan", "Manage")}
-              </Button>
-            }
-          >
-            <div className="grid gap-3 md:grid-cols-2">
-              <ul className="divide-y divide-line rounded-[16px] border border-line">
-                {d.branches.map((br) => (
-                  <li
-                    key={br.id}
-                    className="flex min-h-12 items-center justify-between px-3 py-2 text-[15px]"
-                  >
-                    <span className="font-semibold">{br.name}</span>
-                    <span className="text-fg-2">{br.area}</span>
-                  </li>
-                ))}
-              </ul>
-              <ul className="divide-y divide-line rounded-[16px] border border-line">
-                {d.staff.slice(0, 4).map((s) => (
-                  <li
-                    key={s.id}
-                    className="flex min-h-12 items-center justify-between gap-2 px-3 py-2 text-[15px]"
-                  >
-                    <span className="truncate">{s.name}</span>
-                    <Pill tone={s.role === "owner" ? "orange" : "default"}>
-                      {s.role === "owner"
-                        ? "Owner"
-                        : s.role === "manager"
-                          ? "Manager"
-                          : "Staff"}
-                    </Pill>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </Card>
         </div>
       </div>
     </main>

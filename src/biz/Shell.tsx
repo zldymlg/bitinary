@@ -1,22 +1,14 @@
 import {
   Bell,
-  Check,
-  ChevronDown,
   CloudOff,
   Download,
-  Globe,
-  Moon,
-  Plus,
   Share,
   SquarePlus,
-  Sun,
-  TriangleAlert,
-  Zap,
 } from "lucide-react"
 
 import { AnimatePresence, motion } from "motion/react"
 
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 
 import {
   Link,
@@ -27,8 +19,6 @@ import {
   useNavigate,
 } from "react-router"
 
-import { useTheme } from "@/app/theme"
-
 import { Jimbot } from "@/components/mascot/Jimbot"
 
 import { Button } from "@/components/ui/Button"
@@ -37,7 +27,7 @@ import { Sheet } from "@/components/ui/Sheet"
 
 import { cn } from "@/lib/cn"
 
-import { isEmbed } from "@/lib/forced"
+import { isBizPreview } from "@/lib/forced"
 
 import { useInstallPrompt } from "@/lib/useInstallPrompt"
 
@@ -45,15 +35,16 @@ import { useOnline } from "@/lib/useOnline"
 
 import { relTime } from "./format"
 
-import { ContentIcon, FoxIcon, SearchIcon, StatsIcon, UserIcon } from "./icons"
+import { ContentIcon, StatsIcon, UserIcon } from "./icons"
 
 import { QuickUpdatePanel } from "./QuickUpdate"
 
-import { BizProvider, useBiz, type LangPref } from "./store"
+import { BizProvider, useBiz } from "./store"
 
-import { Avatar, BizStatusChip } from "./ui"
+import { Avatar } from "./ui"
 
 import { resolveBusinessImage } from "./db/assets"
+import { updateNotification } from "./db/notifications"
 
 /* ------------------------------ Root: provider, gate, toast, manifest ------------------------------ */
 
@@ -89,7 +80,7 @@ function BizGate() {
       </main>
     )
 
-  if (!isEmbed() && !new URLSearchParams(search).has("embed")) {
+  if (!isBizPreview()) {
     const authEntry =
       pathname === "/biz/auth" ||
       pathname === "/biz/auth/email" ||
@@ -242,24 +233,15 @@ export function useNav() {
   return [
     {
       to: "/biz/stats",
-      label: t("Statistika", "Statistics"),
-      short: t("Statistika", "Statistics"),
+      label: t("Pangkalahatan", "Overview"),
+      short: t("Pangkalahatan", "Overview"),
       icon: StatsIcon,
-    },
-
-    { to: "/biz/jimbot", label: "Jimbot", short: "Jimbot", icon: FoxIcon },
-
-    {
-      to: "/biz/search",
-      label: t("Hanapin", "Search"),
-      short: t("Hanapin", "Search"),
-      icon: SearchIcon,
     },
 
     {
       to: "/biz/content",
-      label: t("Nilalaman at Social", "Blog and Social"),
-      short: t("Nilalaman", "Social"),
+      label: t("Nilalaman", "Content"),
+      short: t("Nilalaman", "Content"),
       icon: ContentIcon,
     },
 
@@ -270,12 +252,6 @@ export function useNav() {
 type SheetProps = {
   open: boolean
   onClose: () => void
-}
-
-type LanguageOption = {
-  v: LangPref
-  label: string
-  sub: string
 }
 
 function BusinessMark({ size = 44 }: { size?: number }) {
@@ -323,14 +299,12 @@ function BusinessMark({ size = 44 }: { size?: number }) {
   )
 }
 
-function Sidebar({ onBranch }: { onBranch: () => void }) {
+function Sidebar() {
   const nav = useNav()
 
   const { pathname } = useLocation()
 
   const { d, t } = useBiz()
-
-  const branch = d.branches.find((b) => b.id === d.activeBranch)
 
   return (
     <aside className="fixed inset-y-0 left-0 z-40 hidden w-[264px] flex-col bg-brown px-4 pb-5 pt-6 text-cream xl:flex dark:border-r dark:border-line dark:bg-surface">
@@ -343,21 +317,6 @@ function Sidebar({ onBranch }: { onBranch: () => void }) {
           <p className="text-[13px] text-[#E8CDB9]">Bitinary Business</p>
         </div>
       </div>
-      <button
-        onClick={onBranch}
-        className="mt-4 flex h-12 items-center gap-2 rounded-[14px] bg-white/10 px-3 text-left hover:bg-white/15"
-        aria-label={t("Palitan ang branch", "Switch branch")}
-      >
-        <span className="min-w-0 flex-1">
-          <span className="block text-[11px] uppercase tracking-wide text-[#E8CDB9]">
-            Branch
-          </span>
-          <span className="block truncate font-display text-[14px] font-medium">
-            {branch?.name}
-          </span>
-        </span>
-        <ChevronDown size={18} />
-      </button>
       <nav
         aria-label={t("Pangunahing navigation", "Main navigation")}
         className="mt-6 flex flex-col gap-1"
@@ -527,76 +486,8 @@ function IconBtn({
   )
 }
 
-export function LangSheet({ open, onClose }: SheetProps) {
-  const { d, t, setLangPref } = useBiz()
-
-  const opts: LanguageOption[] = [
-    { v: "en", label: "English", sub: "Use Bitinary Business in English" },
-
-    {
-      v: "tl",
-      label: "Tagalog",
-      sub: "Gamitin ang Bitinary Business sa Tagalog",
-    },
-
-    {
-      v: "device",
-      label: t("Sundin ang device", "Follow device"),
-      sub: t(
-        "Ayon sa wika ng phone o computer",
-        "Match your phone or computer's language",
-      ),
-    },
-  ]
-
-  return (
-    <Sheet open={open} onClose={onClose} title={t("Wika", "Language")}>
-      <div role="radiogroup" className="space-y-2">
-        {opts.map((o) => (
-          <button
-            key={o.v}
-            role="radio"
-            aria-checked={d.langPref === o.v}
-            onClick={() => (setLangPref(o.v), onClose())}
-            className={cn(
-              "flex min-h-14 w-full items-center gap-3 rounded-[16px] border-2 px-4 py-2 text-left",
-              d.langPref === o.v
-                ? "border-primary bg-primary/10"
-                : "border-line",
-            )}
-          >
-            <span className="min-w-0 flex-1">
-              <span className="block font-display text-[16px] font-semibold">
-                {o.label}
-              </span>
-              <span className="text-[14px] text-fg-2">{o.sub}</span>
-            </span>
-            {d.langPref === o.v && <Check size={20} className="text-link" />}
-          </button>
-        ))}
-      </div>
-      <p className="mt-3 text-[14px] text-fg-2">
-        {t(
-          "Agad magpapalit, hindi kailangang i-restart.",
-          "Switches instantly, no restart needed.",
-        )}
-      </p>
-    </Sheet>
-  )
-}
-
-function TopBar({
-  onQuick,
-  onLang,
-  onBell,
-}: {
-  onQuick: () => void
-  onLang: () => void
-  onBell: () => void
-}) {
-  const { d, t, status } = useBiz()
-
-  const { resolved, setMode } = useTheme()
+function TopBar({ onBell }: { onBell: () => void }) {
+  const { d, t } = useBiz()
 
   const install = useInstallPrompt()
 
@@ -624,15 +515,9 @@ function TopBar({
               <p className="truncate font-display text-[15px] font-semibold leading-tight">
                 {d.business.name || "Bitinary Business"}
               </p>
-              <BizStatusChip
-                status={status}
-                className="mt-0.5 h-6 px-2 text-[11px]"
-              />
             </div>
           </div>
-          <div className="hidden min-w-0 flex-1 md:block">
-            <BizStatusChip status={status} />
-          </div>
+          <div className="hidden flex-1 md:block" />
           {!install.isStandalone && (
             <>
               <span className="hidden sm:block">
@@ -654,36 +539,6 @@ function TopBar({
               </span>
             </>
           )}
-          <span className="hidden sm:block">
-            <Button size="md" icon={<Zap size={18} />} onClick={onQuick}>
-              {t("Mabilis na Update", "Quick Update")}
-            </Button>
-          </span>
-          <span className="sm:hidden">
-            <IconBtn
-              label={t("Mabilis na Update", "Quick Update")}
-              onClick={onQuick}
-            >
-              <Zap size={21} className="text-link" />
-            </IconBtn>
-          </span>
-          <IconBtn label={t("Wika", "Language")} onClick={onLang}>
-            <Globe size={21} strokeWidth={1.75} />
-          </IconBtn>
-          <IconBtn
-            label={
-              resolved === "dark"
-                ? t("Light mode", "Light mode")
-                : t("Dark mode", "Dark mode")
-            }
-            onClick={() => setMode(resolved === "dark" ? "light" : "dark")}
-          >
-            {resolved === "dark" ? (
-              <Sun size={21} strokeWidth={1.75} />
-            ) : (
-              <Moon size={21} strokeWidth={1.75} />
-            )}
-          </IconBtn>
           <IconBtn
             label={t("Mga notification", "Notifications")}
             onClick={onBell}
@@ -743,7 +598,9 @@ function TopBar({
 }
 
 function NotifSheet({ open, onClose }: SheetProps) {
-  const { d, set, t, lang } = useBiz()
+  const { d, setLocal, t, lang } = useBiz()
+  const [pending, setPending] = useState<string | null>(null)
+  const [error, setError] = useState(false)
 
   const navigate = useNavigate()
 
@@ -753,21 +610,24 @@ function NotifSheet({ open, onClose }: SheetProps) {
       onClose={onClose}
       title={t("Mga notification", "Notifications")}
     >
+      {error && <p role="alert" className="mb-3 text-danger">{t("Hindi na-save. Subukan ulit.", "Could not mark as read. Try again.")}</p>}
+      {!d.notifs.length && <p className="text-fg-2">{t("Walang notification.", "No notifications yet.")}</p>}
       <ul className="space-y-2">
         {d.notifs.map((n) => (
           <li key={n.id}>
             <button
-              onClick={() => {
-                set((x) => ({
-                  ...x,
-                  notifs: x.notifs.map((m) =>
-                    m.id === n.id ? { ...m, read: true } : m,
-                  ),
-                }))
-
+              disabled={pending !== null}
+              onClick={async () => {
+                if (!n.read) {
+                  setError(false)
+                  setPending(n.id)
+                  const { error } = await updateNotification(n.id, { read_at: new Date().toISOString() })
+                  setPending(null)
+                  if (error) { setError(true); return }
+                  await setLocal((x) => ({ ...x, notifs: x.notifs.map((m) => m.id === n.id ? { ...m, read: true } : m) }))
+                }
                 onClose()
-
-                navigate(n.to)
+                if (n.to.startsWith("/biz/")) navigate(n.to)
               }}
               className={cn(
                 "flex w-full items-center gap-3 rounded-[16px] p-3 text-left",
@@ -810,129 +670,46 @@ function NotifSheet({ open, onClose }: SheetProps) {
   )
 }
 
-function BranchSheet({ open, onClose }: SheetProps) {
-  const { d, set, t, showToast } = useBiz()
-
-  const navigate = useNavigate()
-
-  return (
-    <Sheet
-      open={open}
-      onClose={onClose}
-      title={t("Pumili ng branch", "Choose a branch")}
-    >
-      <div role="radiogroup" className="space-y-2">
-        {d.branches.map((b) => (
-          <button
-            key={b.id}
-            role="radio"
-            aria-checked={d.activeBranch === b.id}
-            onClick={() => (
-              set((x) => ({ ...x, activeBranch: b.id })),
-              onClose(),
-              showToast({
-                text: t(`Lumipat sa ${b.name}`, `Switched to ${b.name}`),
-                expression: "pointing",
-              })
-            )}
-            className={cn(
-              "flex min-h-14 w-full items-center gap-3 rounded-[16px] border-2 px-4 text-left",
-              d.activeBranch === b.id
-                ? "border-primary bg-primary/10"
-                : "border-line",
-            )}
-          >
-            <span className="min-w-0 flex-1">
-              <span className="block font-display text-[16px] font-semibold">
-                {b.name}
-              </span>
-              <span className="text-[14px] text-fg-2">{b.area}</span>
-            </span>
-            {d.activeBranch === b.id && (
-              <Check size={20} className="text-link" />
-            )}
-          </button>
-        ))}
-      </div>
-      <Button
-        block
-        variant="secondary"
-        className="mt-3"
-        icon={<Plus size={18} />}
-        onClick={() => (onClose(), navigate("/biz/account/team"))}
-      >
-        {t("Pamahalaan ang mga branch", "Manage branches")}
-      </Button>
-    </Sheet>
-  )
-}
-
 /* ------------------------------ Shell ------------------------------ */
+
+export type BizShellContext = { openQuickUpdate: () => void }
 
 export function BizShell() {
   const { t, status, d } = useBiz()
-
   const online = useOnline()
-
-  const navigate = useNavigate()
-
-  const [sheet, setSheet] =
-    useState<"quick" | "lang" | "bell" | "branch" | null>(null)
+  const [sheet, setSheet] = useState<"quick" | "bell" | null>(null)
+  const quickDirty = useRef(false)
+  const markQuickDirty = useCallback((dirty: boolean) => { quickDirty.current = dirty }, [])
+  const closeSheet = useCallback(() => {
+    markQuickDirty(false)
+    setSheet(null)
+  }, [markQuickDirty])
+  const cancelQuick = () => {
+    if (!quickDirty.current || window.confirm(t("Itapon ang hindi na-save na update?", "Discard the unsaved update?"))) closeSheet()
+  }
+  const allowQuick = status === "verified" && !!d.business.id && !isBizPreview()
 
   return (
     <div className="min-h-dvh bg-bg text-fg">
-      <Sidebar onBranch={() => setSheet("branch")} />
+      <Sidebar />
       <Rail />
       <div className="min-h-dvh pb-28 md:ml-[84px] md:pb-10 xl:ml-[264px]">
-        <TopBar
-          onQuick={() => setSheet("quick")}
-          onLang={() => setSheet("lang")}
-          onBell={() => setSheet("bell")}
-        />
+        <TopBar onBell={() => setSheet("bell")} />
         {!online && (
-          <div
-            role="status"
-            className="mx-4 mt-3 flex items-center gap-3 rounded-[16px] bg-caution-bg px-4 py-3 text-caution md:mx-8"
-          >
+          <div role="status" className="mx-4 mt-3 flex items-center gap-3 rounded-[16px] bg-caution-bg px-4 py-3 text-caution md:mx-8">
             <CloudOff size={20} className="shrink-0" />
             <p className="text-[15px] font-semibold">
-              {t(
-                "Offline ka. Nase-save sa device ang mga pagbabago at isi-sync mamaya.",
-                "You're offline. Changes save on this device and sync later.",
-              )}
+              {t("Offline ka. Kumonekta ulit para makapag-save.", "You're offline. Reconnect to save changes.")}
             </p>
           </div>
         )}
-        {status === "draft" && d.session && (
-          <button
-            onClick={() => navigate("/biz/setup")}
-            className="mx-4 mt-3 flex w-[calc(100%-2rem)] items-center gap-3 rounded-[16px] border-2 border-caution/40 bg-caution-bg px-4 py-3 text-left text-caution md:mx-8 md:w-[calc(100%-4rem)]"
-          >
-            <TriangleAlert size={20} className="shrink-0" />
-            <span className="flex-1 text-[15px] font-semibold">
-              {t(
-                "Draft pa ang negosyo mo. Tapusin ang 4 na kailangan para mag-live.",
-                "Your business is still a draft. Finish the 4 required themes to go live.",
-              )}
-            </span>
-            <span className="font-display text-[14px] font-medium underline">
-              {t("Ituloy", "Continue")}
-            </span>
-          </button>
-        )}
-        <Outlet />
+        <Outlet context={{ openQuickUpdate: () => { if (allowQuick) setSheet("quick") } } satisfies BizShellContext} />
       </div>
       <TabBar />
-      <Sheet
-        open={sheet === "quick"}
-        onClose={() => setSheet(null)}
-        title={t("Mabilis na Update", "Quick Update")}
-      >
-        <QuickUpdatePanel compact onDone={() => setSheet(null)} />
+      <Sheet open={sheet === "quick" && allowQuick} onClose={cancelQuick} title={t("Mabilis na Update", "Quick Update")}>
+        <QuickUpdatePanel onDone={closeSheet} onCancel={cancelQuick} onDirtyChange={markQuickDirty} />
       </Sheet>
-      <LangSheet open={sheet === "lang"} onClose={() => setSheet(null)} />
-      <NotifSheet open={sheet === "bell"} onClose={() => setSheet(null)} />
-      <BranchSheet open={sheet === "branch"} onClose={() => setSheet(null)} />
+      <NotifSheet open={sheet === "bell"} onClose={closeSheet} />
     </div>
   )
 }

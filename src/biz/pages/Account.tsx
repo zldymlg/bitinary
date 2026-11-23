@@ -1,8 +1,6 @@
 import {
   ArrowLeft,
-  Bell,
   Check,
-  CalendarCheck,
   ChevronDown,
   CreditCard,
   Download,
@@ -10,20 +8,12 @@ import {
   HelpCircle,
   ImagePlus,
   KeyRound,
-  Laptop,
   Link2,
   LogOut,
   Mail,
-  MessageCircle,
   Moon,
-  Phone,
-  QrCode,
-  Rocket,
   Shield,
-  Smartphone,
   Store,
-  Tag,
-  Trash2,
   User,
   Users,
 } from "lucide-react"
@@ -34,19 +24,15 @@ import { useNavigate } from "react-router"
 
 import { useTheme, type ThemeMode } from "@/app/theme"
 
-import { GoogleLogo, inputBase, PasswordField } from "@/components/flow/Fields"
+import { inputBase, PasswordField } from "@/components/flow/Fields"
 
 import { IOSAlert } from "@/components/flow/IOSAlert"
-
-import { Jimbot } from "@/components/mascot/Jimbot"
 
 import { Button } from "@/components/ui/Button"
 
 import { Segmented } from "@/components/ui/Segmented"
 
 import { Sheet } from "@/components/ui/Sheet"
-
-import { Toggle } from "@/components/ui/Toggle"
 
 import { cn } from "@/lib/cn"
 
@@ -64,7 +50,7 @@ import { longDate } from "../format"
 
 import type { Staff } from "../seed"
 
-import { useBiz, type Channel, type LangPref } from "../store"
+import { useBiz, type LangPref } from "../store"
 
 import { Avatar, Card, Group, GroupRow, PageHeader, Pill } from "../ui"
 
@@ -112,7 +98,7 @@ export function SubPage({
 }
 
 export function AccountHome() {
-  const { d, t, lang, reset, signOut, status, verified } = useBiz()
+  const { d, t, lang, signOut } = useBiz()
 
   const navigate = useNavigate()
 
@@ -120,7 +106,7 @@ export function AccountHome() {
 
   return (
     <main>
-      <PageHeader title="Account" phase="MVP" />
+      <PageHeader title={t("Account", "Account")} />
       <div className="max-w-[860px] space-y-6 px-4 md:px-8">
         <section className="flex items-center gap-4 rounded-[24px] bg-brown p-4 text-cream dark:bg-elevated">
           <Avatar name={d.profile.name || "B"} size={64} />
@@ -145,8 +131,8 @@ export function AccountHome() {
             color="#FF6A00"
             label="Profile"
             sub={t(
-              "Pangalan, email, mobile, password, device",
-              "Name, email, mobile, password, devices",
+              "Pangalan, email, mobile, at password",
+              "Name, email, mobile, and password",
             )}
             to="/biz/account/profile"
           />
@@ -154,83 +140,13 @@ export function AccountHome() {
         <Group title={t("Negosyo", "Business")}>
           <GroupRow
             icon={<Store size={19} />}
-            color="#E07800"
-            label={t("Public profile ng negosyo", "Business page profile")}
-            sub={t(
-              "Cover, detalye at contact na makikita ng biyahero",
-              "Cover, details and contact shown to travelers",
-            )}
-            to="/biz/account/profile"
-          />
-          <GroupRow
-            icon={<Store size={19} />}
             color="#6B3A22"
-            label={t("Impormasyon ng Negosyo", "Backgrounds")}
+            label={t("Impormasyon ng Negosyo", "Business information")}
             sub={t(
               "Basics, lokasyon, oras, menu, permit",
               "Basics, location, hours, menu, permits",
             )}
             to="/biz/stats/backgrounds"
-          />
-          <GroupRow
-            icon={<Users size={19} />}
-            color="#0B7F96"
-            label={t(
-              "Branch, staff at pahintulot",
-              "Branches, staff and permissions",
-            )}
-            value={`${d.staff.length}`}
-            to="/biz/account/team"
-          />
-          <GroupRow
-            icon={<QrCode size={19} />}
-            color="#3A1A0E"
-            label={t("QR Check-in kit", "QR Check-in kit")}
-            to="/biz/account/qr"
-          />
-        </Group>
-        <Group title={t("Paglago at bayad", "Growth and billing")}>
-          <GroupRow
-            icon={<Tag size={19} />}
-            color="#C84A00"
-            label="Deals"
-            value={
-              !verified ? (
-                <Pill>{t("Naka-lock", "Locked")}</Pill>
-              ) : (
-                `${d.deals.length}`
-              )
-            }
-            to="/biz/account/deals"
-          />
-          <GroupRow
-            icon={<Rocket size={19} />}
-            color="#B26A00"
-            label={t("Mga boost", "Boosts")}
-            value={
-              !verified ? <Pill>{t("Naka-lock", "Locked")}</Pill> : undefined
-            }
-            to="/biz/account/boost"
-          />
-          <GroupRow
-            icon={<CalendarCheck size={19} />}
-            color="#1B8A3A"
-            label={t("Reservation at pila", "Reservations and queue")}
-            value={
-              !verified ? (
-                <Pill>{t("Naka-lock", "Locked")}</Pill>
-              ) : (
-                `${d.requests.filter((r) => r.status === "new").length} ${t("bago", "new")}`
-              )
-            }
-            to="/biz/account/reservations"
-          />
-          <GroupRow
-            icon={<CreditCard size={19} />}
-            color="#5B3CC4"
-            label={t("Plan at bayad", "Plan and billing")}
-            value="Free"
-            to="/biz/account/billing"
           />
         </Group>
         <Group title={t("App", "App")}>
@@ -239,8 +155,8 @@ export function AccountHome() {
             color="#0B7F96"
             label={t("Mga Preference", "Preferences")}
             sub={t(
-              "Wika, itsura, notification, privacy",
-              "Language, appearance, notifications, privacy",
+              "Wika at itsura",
+              "Language and appearance",
             )}
             value={lang === "en" ? "English" : "Tagalog"}
             to="/biz/account/preferences"
@@ -259,15 +175,6 @@ export function AccountHome() {
             onClick={() => setOut(true)}
           />
         </Group>
-        <p className="text-center text-[13px] text-fg-2">
-          Bitinary Business · {status} ·{" "}
-          <button
-            className="underline"
-            onClick={() => (reset(), navigate("/biz/welcome"))}
-          >
-            {t("I-reset ang demo", "Reset demo")}
-          </button>
-        </p>
       </div>
       <IOSAlert
         open={out}
@@ -285,7 +192,7 @@ export function AccountHome() {
             onClick: async () => {
               const result = await signOut()
 
-              if (!result.error) navigate("/welcome", { replace: true })
+              if (!result.error) navigate("/biz/welcome", { replace: true })
             },
           },
         ]}
@@ -295,7 +202,7 @@ export function AccountHome() {
 }
 
 export function ProfilePage() {
-  const { d, set, t, lang, showToast, retryLoad } = useBiz()
+  const { d, setLocal, t, showToast, retryLoad } = useBiz()
 
   const [p, setP] = useState(d.profile)
 
@@ -404,29 +311,6 @@ export function ProfilePage() {
     setPasswordSuccess(null)
   }
 
-  const devices = [
-    {
-      icon: <Laptop size={20} />,
-      name: "Chrome · Windows",
-      where: "Ermita, Maynila",
-      now: true,
-    },
-
-    {
-      icon: <Smartphone size={20} />,
-      name: "Bitinary Business · iPhone",
-      where: "Ermita, Maynila",
-    },
-
-    {
-      icon: <Smartphone size={20} />,
-      name: "Chrome · Android",
-      where: "Quezon City",
-    },
-  ]
-
-  const [devs, setDevs] = useState(devices)
-
   useEffect(() => {
     setP(d.profile)
   }, [d.profile])
@@ -503,7 +387,7 @@ export function ProfilePage() {
       if (result.error || !result.data)
         throw new Error(result.error ?? "Could not save your profile.")
 
-      set((current) => ({
+      await setLocal((current) => ({
         ...current,
         profile: { ...current.profile, ...result.data },
       }))
@@ -632,7 +516,7 @@ export function ProfilePage() {
   }, [logoPreview])
 
   return (
-    <SubPage title="Profile" phase="MVP">
+    <SubPage title={t("Profile", "Profile")}>
       <Card>
         <div className="grid gap-4 md:grid-cols-2">
           {([
@@ -871,73 +755,12 @@ export function ProfilePage() {
       </Card>
       <Group>
         <GroupRow
-          icon={<GoogleLogo size={18} />}
-          color="#FFFFFF"
-          label="Google"
-          sub={
-            d.profile.google
-              ? d.profile.google
-              : t("Hindi pa konektado", "Not connected")
-          }
-          trailing={
-            <Button
-              size="sm"
-              variant="secondary"
-              onClick={() =>
-                set((x) => ({
-                  ...x,
-                  profile: {
-                    ...x.profile,
-                    google: x.profile.google
-                      ? undefined
-                      : "business@example.com",
-                  },
-                }))
-              }
-            >
-              {d.profile.google
-                ? t("Idiskonekta", "Disconnect")
-                : t("Ikonekta", "Connect")}
-            </Button>
-          }
-        />
-        <GroupRow
           icon={<KeyRound size={19} />}
           color="#6B3A22"
           label={t("Palitan ang password", "Change password")}
           onClick={() => setPw(true)}
         />
       </Group>
-      <Card
-        title={t("Mga aktibong device", "Active devices")}
-        icon={<Shield size={20} />}
-      >
-        <ul className="divide-y divide-line">
-          {devs.map((x) => (
-            <li key={x.name} className="flex min-h-14 items-center gap-3 py-2">
-              <span className="text-link">{x.icon}</span>
-              <span className="min-w-0 flex-1">
-                <span className="block text-[16px]">{x.name}</span>
-                <span className="text-[14px] text-fg-2">
-                  {x.where} ·{" "}
-                  {x.now
-                    ? t("Ito ang device na ito", "This device")
-                    : longDate(Date.now() - 2 * 864e5, lang)}
-                </span>
-              </span>
-              {!x.now && (
-                <Button
-                  size="sm"
-                  variant="danger"
-                  onClick={() => setDevs(devs.filter((y) => y !== x))}
-                >
-                  {t("I-sign out", "Sign out")}
-                </Button>
-              )}
-            </li>
-          ))}
-        </ul>
-      </Card>
       <Sheet
         open={pw}
         onClose={closePasswordSheet}
@@ -1441,22 +1264,11 @@ export function BillingPage() {
 }
 
 export function PreferencesPage() {
-  const { d, set, t, setLangPref, showToast } = useBiz()
-
+  const { d, t, setLangPref } = useBiz()
   const { mode, setMode } = useTheme()
 
-  const [del, setDel] = useState(false)
-
-  const notif = d.prefs.notif
-
-  const n = (k: keyof typeof notif, v: boolean) =>
-    set((x) => ({
-      ...x,
-      prefs: { ...x.prefs, notif: { ...x.prefs.notif, [k]: v } },
-    }))
-
   return (
-    <SubPage title={t("Mga Preference", "Preferences")} phase="MVP">
+    <SubPage title={t("Mga Preference", "Preferences")}>
       <Card title={t("Wika", "Language")} icon={<Globe size={20} />}>
         <Segmented<LangPref>
           className="w-full"
@@ -1465,27 +1277,10 @@ export function PreferencesPage() {
           onChange={setLangPref}
           options={[
             { value: "en", label: "English" },
-
             { value: "tl", label: "Tagalog" },
-
             { value: "device", label: t("Sundin ang device", "Follow device") },
           ]}
         />
-        <div className="mt-3 flex items-center gap-3 rounded-[14px] bg-sunken p-3 dark:bg-elevated">
-          <span className="flex-1 text-[15px]">
-            {t(
-              "Jimbot: sundin ang tina-type ko (Taglish)",
-              "Jimbot: match what I type (Taglish)",
-            )}
-          </span>
-          <Toggle
-            label="Jimbot"
-            checked={d.prefs.jimbotMatch}
-            onChange={(v) =>
-              set((x) => ({ ...x, prefs: { ...x.prefs, jimbotMatch: v } }))
-            }
-          />
-        </div>
       </Card>
       <Card title={t("Itsura", "Appearance")} icon={<Moon size={20} />}>
         <Segmented<ThemeMode>
@@ -1494,251 +1289,23 @@ export function PreferencesPage() {
           value={mode}
           onChange={setMode}
           options={[
-            { value: "light", label: "Light" },
-
-            { value: "dark", label: "Dark" },
-
-            { value: "system", label: "System" },
+            { value: "light", label: t("Maliwanag", "Light") },
+            { value: "dark", label: t("Madilim", "Dark") },
+            { value: "system", label: t("Sundin ang device", "Follow device") },
           ]}
         />
       </Card>
-      <Card title="Notifications" icon={<Bell size={20} />}>
-        <ul className="divide-y divide-line">
-          {([
-            ["reviews", t("Bagong review", "New reviews")],
-
-            ["comments", t("Bagong komento", "New comments")],
-
-            ["reports", t("Update sa report", "Report updates")],
-
-            ["weekly", t("Lingguhang report", "Weekly report")],
-
-            ["deals", t("Deal at redemption", "Deals and redemptions")],
-          ] as const)
-
-            .map(([k, l]) => (
-              <li
-                key={k}
-                className="flex min-h-14 items-center justify-between gap-3"
-              >
-                <span className="text-[16px]">{l}</span>
-                <Toggle
-                  label={l}
-                  checked={notif[k]}
-                  onChange={(v) => n(k, v)}
-                />
-              </li>
-            ))}
-        </ul>
-        <p className="mb-2 mt-4 font-display text-[14px] font-medium">
-          {t("Saan ipapadala ang report", "Report delivery channel")}
-        </p>
-        <Segmented<Channel>
-          className="w-full"
-          value={d.prefs.channel}
-          onChange={(c) =>
-            set((x) => ({ ...x, prefs: { ...x.prefs, channel: c } }))
-          }
-          options={[
-            { value: "notif", label: "Notification" },
-
-            { value: "messenger", label: "Messenger" },
-
-            { value: "sms", label: "SMS" },
-          ]}
-        />
-      </Card>
-      <Card
-        title={t("Data at privacy", "Data and privacy")}
-        icon={<Shield size={20} />}
-      >
-        <p className="text-[15px] text-fg-2">
-          {t(
-            "Sumusunod kami sa Data Privacy Act of 2012 (RA 10173).",
-            "We follow the Data Privacy Act of 2012 (RA 10173).",
-          )}
-        </p>
-        <div className="mt-3 flex flex-wrap gap-2">
-          <Button
-            variant="secondary"
-            icon={<Download size={17} />}
-            onClick={() =>
-              showToast({
-                text: t(
-                  "Ipapadala namin sa email mo ang kopya.",
-                  "We'll email you a copy.",
-                ),
-                expression: "pointing",
-              })
-            }
-          >
-            {t("I-download ang data ko", "Download my data")}
-          </Button>
-          <Button
-            variant="danger"
-            icon={<Trash2 size={17} />}
-            onClick={() => setDel(true)}
-          >
-            {t("Burahin ang account", "Delete account")}
-          </Button>
-        </div>
-      </Card>
-      <IOSAlert
-        open={del}
-        title={t("Burahin ang account?", "Delete your account?")}
-        message={t(
-          "Matatanggal ang negosyo mo sa Bitinary pagkatapos ng 30 araw. Puwede mo pang kanselahin sa panahong iyon.",
-          "Your business will be removed from Bitinary after 30 days. You can cancel during that time.",
-        )}
-        actions={[
-          { label: t("Kanselahin", "Cancel"), onClick: () => setDel(false) },
-
-          {
-            label: t("Burahin", "Delete"),
-            destructive: true,
-            bold: true,
-            onClick: () => (
-              setDel(false),
-              showToast({
-                text: t(
-                  "Naka-iskedyul ang pagbura sa loob ng 30 araw.",
-                  "Deletion scheduled in 30 days.",
-                ),
-                expression: "sleeping",
-              })
-            ),
-          },
-        ]}
-      />
     </SubPage>
   )
 }
 
 export function HelpPage() {
-  const { t, showToast } = useBiz()
-
-  const [open, setOpen] = useState<number | null>(0)
-
-  const faqs: [string, string][] = [
-    [
-      t("Gaano katagal ang verification?", "How long does verification take?"),
-      t(
-        "Karaniwang 1–2 araw ng trabaho pagkatapos ma-upload ang permit.",
-        "Usually 1–2 business days after you upload your permit.",
-      ),
-    ],
-
-    [
-      t(
-        "Puwede bang tanggalin ang negatibong review?",
-        "Can I remove a negative review?",
-      ),
-      t(
-        "Hindi tinatanggal ang negatibong review dahil lang negatibo ito. I-report lang kung lumalabag sa guidelines.",
-        "Negative reviews are not removed just because they are negative. Report only if it breaks the guidelines.",
-      ),
-    ],
-
-    [
-      t("Paano gumagana ang Mga Dumating?", "How does Customers sent work?"),
-      t(
-        "Binibilang namin ang bawat deal na na-redeem sa QR o code sa counter mo.",
-        "We count every deal redeemed with a QR or code at your counter.",
-      ),
-    ],
-
-    [
-      t("Libre ba ang Bitinary Business?", "Is Bitinary Business free?"),
-      t(
-        "Oo. Ang Plus at boosts ay opsyonal.",
-        "Yes. Plus and boosts are optional.",
-      ),
-    ],
-  ]
+  const { t } = useBiz()
 
   return (
-    <SubPage title={t("Tulong at suporta", "Help and support")} phase="MVP">
-      <Card className="flex flex-wrap items-center gap-4 bg-primary">
-        <Jimbot
-          expression="waving"
-          variant="standalone"
-          size={90}
-          className="-my-3"
-        />
-        <div className="min-w-0 flex-1">
-          <p className="font-display text-[20px] font-bold text-white">
-            {t(
-              "Tulungan kami ng Bitinary team",
-              "Get help from the Bitinary team",
-            )}
-          </p>
-          <p className="text-[15px] font-semibold text-ink">
-            {t(
-              "Lunes hanggang Sabado, 8 AM–6 PM",
-              "Monday to Saturday, 8 AM–6 PM",
-            )}
-          </p>
-        </div>
-        <Button
-          variant="brown"
-          onClick={() =>
-            showToast({
-              text: t(
-                "Salamat! Makikipag-ugnayan ang team sa loob ng 1 oras.",
-                "Thanks! The team will reach out within 1 hour.",
-              ),
-            })
-          }
-        >
-          {t("Humingi ng tulong", "Request help")}
-        </Button>
-      </Card>
-      <Group>
-        <GroupRow
-          icon={<Phone size={19} />}
-          color="#1B8A3A"
-          label={t("Tumawag", "Call")}
-          value="(02) 8888 2468"
-          onClick={() => (location.href = "tel:0288882468")}
-        />
-        <GroupRow
-          icon={<MessageCircle size={19} />}
-          color="#0B7F96"
-          label="Messenger"
-          value="m.me/bitinarybiz"
-        />
-        <GroupRow
-          icon={<Mail size={19} />}
-          color="#C84A00"
-          label="Email"
-          value="biz@bitinary.ph"
-          onClick={() => (location.href = "mailto:biz@bitinary.ph")}
-        />
-      </Group>
-      <Card title="FAQs">
-        <ul className="divide-y divide-line">
-          {faqs.map(([q, a], i) => (
-            <li key={q}>
-              <button
-                onClick={() => setOpen(open === i ? null : i)}
-                aria-expanded={open === i}
-                className="flex min-h-14 w-full items-center gap-3 py-2 text-left"
-              >
-                <span className="flex-1 font-display text-[16px] font-medium">
-                  {q}
-                </span>
-                <ChevronDown
-                  size={18}
-                  className={cn(
-                    "shrink-0 text-link transition-transform",
-                    open === i && "rotate-180",
-                  )}
-                />
-              </button>
-              {open === i && <p className="pb-3 text-[15px] text-fg-2">{a}</p>}
-            </li>
-          ))}
-        </ul>
+    <SubPage title={t("Tulong at suporta", "Help and support")}>
+      <Card title={t("Makipag-ugnayan sa Bitinary", "Contact Bitinary")} icon={<Mail size={20} />}>
+        <a className="inline-flex min-h-11 items-center font-semibold text-link underline underline-offset-2" href="mailto:biz@bitinary.ph">biz@bitinary.ph</a>
       </Card>
     </SubPage>
   )

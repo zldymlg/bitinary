@@ -6,6 +6,7 @@ import { Jimbot, type Expression } from '@/components/mascot/Jimbot'
 import { Button } from '@/components/ui/Button'
 import { PhaseTag } from '@/components/ui/PhaseTag'
 import { cn } from '@/lib/cn'
+import { isBizPreview } from '@/lib/forced'
 import { Sparkline } from './charts'
 import { compactNum, pct } from './format'
 import { useBiz, type BizStatus } from './store'
@@ -20,7 +21,7 @@ export function PageHeader({ title, sub, phase, actions, tabs, className }: { ti
         <div className="min-w-0">
           <h1 className="flex flex-wrap items-center gap-2 text-title md:text-[34px]">
             {title}
-            {phase && <PhaseTag phase={phase} />}
+            {phase && isBizPreview() && <PhaseTag phase={phase} />}
           </h1>
           {sub && <p className="mt-1 text-body text-fg-2">{sub}</p>}
         </div>
@@ -60,7 +61,7 @@ export function Card({ title, icon, action, children, className, phase, sub, id 
           <div className="min-w-0 flex-1">
             <h2 className="flex flex-wrap items-center gap-2 text-h3">
               {title}
-              {phase && <PhaseTag phase={phase} />}
+              {phase && isBizPreview() && <PhaseTag phase={phase} />}
             </h2>
             {sub && <p className="mt-0.5 text-[14px] text-fg-2">{sub}</p>}
           </div>

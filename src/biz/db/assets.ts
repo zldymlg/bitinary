@@ -71,6 +71,7 @@ export async function uploadBusinessAsset(
   file: Blob,
 
   kind: "image" | "video",
+  folder = "posts",
 ): Promise<string> {
   const { data: auth, error: authError } = await supabase.auth.getUser()
 
@@ -87,7 +88,7 @@ export async function uploadBusinessAsset(
       ?.replace("jpeg", "jpg")
       .replace(/[^a-z0-9]/gi, "") || (kind === "video" ? "mp4" : "jpg")
 
-  const path = `${auth.user.id}/business/${businessId}/posts/${crypto.randomUUID()}.${extension}`
+  const path = `${auth.user.id}/business/${businessId}/${folder}/${crypto.randomUUID()}.${extension}`
 
   const { data, error } = await supabase.storage
     .from(bucket)

@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
+import { isBizPreview } from './forced'
 
 const url = import.meta.env.VITE_SUPABASE_URL
 const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
@@ -8,10 +9,13 @@ if (!url || !anonKey) {
 }
 
 // Public client key lang ang ligtas ilagay sa browser; RLS ang dapat magpatupad ng access.
+const preview = isBizPreview()
+
 export const supabase = createClient(url, anonKey, {
   auth: {
-    persistSession: true,
-    autoRefreshToken: true,
-    detectSessionInUrl: true,
+    persistSession: !preview,
+    autoRefreshToken: !preview,
+    detectSessionInUrl: !preview,
   },
+  ...(preview && { global: { fetch: async () => new Response('{"message":"Read-only business preview"}', { status: 403, headers: { 'Content-Type': 'application/json' } }) } }),
 })
