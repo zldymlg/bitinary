@@ -55,6 +55,7 @@ export function ForYou() {
 
 export function GuestBanner() {
   const { session } = useAccount()
+  const { t } = useLang()
   const navigate = useNavigate()
   const [hidden, setHidden] = useState(false)
   if (session?.kind !== 'guest' || hidden) return null
@@ -64,13 +65,13 @@ export function GuestBanner() {
         <UserPlus size={20} />
       </span>
       <div className="min-w-0 flex-1">
-        <p className="font-display text-[15px] font-semibold leading-tight">Nag-e-explore ka bilang guest</p>
-        <p className="text-[13px] text-fg-2">Mag-sign up para ma-save ang trips at lugar.</p>
+        <p className="font-display text-[15px] font-semibold leading-tight">{t('Nag-e-explore ka bilang guest', "You're exploring as a guest")}</p>
+        <p className="text-[13px] text-fg-2">{t('Mag-sign up para ma-save ang trips at lugar.', 'Sign up to save trips and places.')}</p>
       </div>
       <Button size="sm" onClick={() => navigate('/signup/role')}>
-        Mag-sign up
+        {t('Mag-sign up', 'Sign up')}
       </Button>
-      <button aria-label="Isara" onClick={() => setHidden(true)} className="-mr-1 flex h-11 w-8 items-center justify-center text-muted">
+      <button aria-label={t('Isara', 'Close')} onClick={() => setHidden(true)} className="-mr-1 flex h-11 w-8 items-center justify-center text-muted">
         <X size={18} />
       </button>
     </div>

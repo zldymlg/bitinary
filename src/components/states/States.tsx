@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { useT } from '@/app/i18n'
 import { cn } from '@/lib/cn'
 import { Jimbot, type Expression } from '../mascot/Jimbot'
 import { Button } from '../ui/Button'
@@ -45,23 +46,29 @@ export function StateView({
   )
 }
 
-export const OfflineState = (p: { onRetry?: () => void; tone?: 'default' | 'dark'; body?: string }) => (
-  <StateView
-    expression="sleeping"
-    title="Offline ka ngayon"
-    body={p.body ?? 'Natutulog muna si Jimbot habang walang internet. Makikita mo pa rin ang mga naka-save mong itinerary.'}
-    action="Subukan ulit"
-    onAction={p.onRetry ?? (() => location.reload())}
-    tone={p.tone}
-  />
-)
+export const OfflineState = (p: { onRetry?: () => void; tone?: 'default' | 'dark'; body?: string }) => {
+  const t = useT()
+  return (
+    <StateView
+      expression="sleeping"
+      title={t('Offline ka ngayon', "You're offline")}
+      body={p.body ?? t('Natutulog muna si Jimbot habang walang internet. Makikita mo pa rin ang mga naka-save mong itinerary.', 'Jimbot is taking a break while there is no internet. You can still see your saved itineraries.')}
+      action={t('Subukan ulit', 'Try again')}
+      onAction={p.onRetry ?? (() => location.reload())}
+      tone={p.tone}
+    />
+  )
+}
 
-export const ErrorState = (p: { onRetry?: () => void }) => (
-  <StateView
-    expression="unsure"
-    title="May nangyaring mali"
-    body="Hindi ko ma-load ito ngayon. Hindi ako manghuhula, kaya subukan nating i-refresh."
-    action="I-refresh"
-    onAction={p.onRetry ?? (() => location.reload())}
-  />
-)
+export const ErrorState = (p: { onRetry?: () => void }) => {
+  const t = useT()
+  return (
+    <StateView
+      expression="unsure"
+      title={t('May nangyaring mali', 'Something went wrong')}
+      body={t('Hindi ko ma-load ito ngayon. Hindi ako manghuhula, kaya subukan nating i-refresh.', "I can't load this right now. I don't guess, so let's try refreshing.")}
+      action={t('I-refresh', 'Refresh')}
+      onAction={p.onRetry ?? (() => location.reload())}
+    />
+  )
+}

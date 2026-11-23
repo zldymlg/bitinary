@@ -190,8 +190,9 @@ function HeaderButton({ children, label, onClick }: { children: ReactNode; label
 
 function Categories() {
   const navigate = useNavigate()
+  const { t } = useLang()
   return (
-    <section aria-label="Mga kategorya" className="grid grid-cols-4 gap-x-2 gap-y-3 px-4 @2xl:grid-cols-8 md:px-0">
+    <section aria-label={t('Mga kategorya', 'Categories')} className="grid grid-cols-4 gap-x-2 gap-y-3 px-4 @2xl:grid-cols-8 md:px-0">
       {categories.map((c) => (
         <CategoryTile key={c} category={c} onClick={() => navigate(`/search?cat=${encodeURIComponent(c)}`)} />
       ))}
