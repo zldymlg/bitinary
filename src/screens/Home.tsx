@@ -130,7 +130,7 @@ export function HomeHeader() {
             </span>
           </button>
           <div className="flex gap-1.5">
-            <HeaderButton label={t('Mga abiso', 'Notifications')} onClick={() => setSheet('notif')} badge>
+            <HeaderButton label={t('Mga abiso', 'Notifications')} onClick={() => setSheet('notif')}>
               <Bell size={21} strokeWidth={1.75} />
             </HeaderButton>
             <HeaderButton label={t('Naka-save', 'Saved')} onClick={() => setSheet('saved')}>
@@ -175,7 +175,7 @@ export function HomeHeader() {
   )
 }
 
-function HeaderButton({ children, label, onClick, badge }: { children: ReactNode; label: string; onClick: () => void; badge?: boolean }) {
+function HeaderButton({ children, label, onClick }: { children: ReactNode; label: string; onClick: () => void }) {
   return (
     <motion.button
       whileTap={{ scale: 0.92 }}
@@ -184,15 +184,15 @@ function HeaderButton({ children, label, onClick, badge }: { children: ReactNode
       className="relative flex h-11 w-11 items-center justify-center rounded-full bg-white/25 text-ink"
     >
       {children}
-      {badge && <span className="absolute right-2.5 top-2.5 h-2.5 w-2.5 rounded-full bg-amber ring-2 ring-primary" />}
     </motion.button>
   )
 }
 
 function Categories() {
   const navigate = useNavigate()
+  const { t } = useLang()
   return (
-    <section aria-label="Mga kategorya" className="grid grid-cols-4 gap-x-2 gap-y-3 px-4 @2xl:grid-cols-8 md:px-0">
+    <section aria-label={t('Mga kategorya', 'Categories')} className="grid grid-cols-4 gap-x-2 gap-y-3 px-4 @2xl:grid-cols-8 md:px-0">
       {categories.map((c) => (
         <CategoryTile key={c} category={c} onClick={() => navigate(`/search?cat=${encodeURIComponent(c)}`)} />
       ))}

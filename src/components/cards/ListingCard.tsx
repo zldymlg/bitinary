@@ -5,12 +5,13 @@ import { useStore } from '@/app/store'
 import type { Place } from '@/data/places'
 import { cn } from '@/lib/cn'
 import { img } from '@/lib/format'
+import { isDatabaseBusinessId, persistSavedPlace } from '@/lib/savedPlaces'
 import { useOpen } from '@/lib/useOpen'
 import { ClosingPill, QueuePill, VerifiedPill } from '../ui/Pill'
 
 export function HeartButton({ id, className, tone = 'glass' }: { id: string; className?: string; tone?: 'glass' | 'plain' }) {
   const { saved, toggleSaved, showToast } = useStore()
-  const { requireAccount } = useAccount()
+  const { requireAccount, session } = useAccount()
   const on = saved.includes(id)
   return (
     <motion.button
@@ -18,11 +19,22 @@ export function HeartButton({ id, className, tone = 'glass' }: { id: string; cla
       whileTap={{ scale: 0.85 }}
       aria-label={on ? 'Alisin sa naka-save' : 'I-save'}
       aria-pressed={on}
-      onClick={(e) => {
+      onClick={async (e) => {
         e.stopPropagation()
         if (!on && !requireAccount('Para ma-save ang lugar na ito.')) return
-        toggleSaved(id)
-        if (!on) showToast({ text: 'Na-save sa iyong listahan!', expression: 'celebrating' })
+        try {
+          if (isDatabaseBusinessId(id)) {
+            if (session?.kind !== 'user' || !session.accountId) {
+              showToast({ text: 'Hindi ma-verify ang iyong account. Mag-sign in ulit at subukan muli.' })
+              return
+            }
+            await persistSavedPlace(session.accountId, id, !on)
+          }
+          toggleSaved(id)
+          if (!on) showToast({ text: 'Na-save sa iyong listahan!', expression: 'celebrating' })
+        } catch (error: unknown) {
+          showToast({ text: error instanceof Error ? error.message : 'Could not update saved places.' })
+        }
       }}
       className={cn(
         'flex h-11 w-11 items-center justify-center rounded-full',

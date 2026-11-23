@@ -1146,25 +1146,26 @@ export function BillingPage() {
         {([
           [
             "free",
-            "Free",
+            "Business Free",
             "₱0",
             [
-              t("Profile, Quick Update, posts", "Profile, Quick Update, posts"),
-              t("Basic stats", "Basic stats"),
+              t("Business profile at verification submission", "Business profile and verification submission"),
+              t("Quick Update", "Quick Update"),
+              t("Posts at basic stats", "Posts and basic stats"),
+              t("Profile Health Score", "Profile Health Score"),
             ],
           ],
 
           [
             "plus",
-            "Plus",
+            "Business Plus",
             "₱499",
             [
-              t(
-                "Analitika at lingguhang report",
-                "Analytics and weekly report",
-              ),
+              t("Analytics at report export", "Analytics and report export"),
               t("Hanggang 3 branch", "Up to 3 branches"),
               t("Priority na suporta", "Priority support"),
+              t("QR check-in materials", "QR check-in materials"),
+              t("Deals pagkatapos ma-verify", "Deals after verification"),
             ],
           ],
         ] as const)
@@ -1194,6 +1195,27 @@ export function BillingPage() {
             </button>
           ))}
       </div>
+      <Card
+        title={t("Team at karagdagang serbisyo", "Team and additional services")}
+        icon={<Users size={20} />}
+      >
+        <ul className="divide-y divide-line">
+          {[
+            [t("Team at institutional seats", "Team and institutional seats"), "₱550 / seat / year", t("Manager at staff accounts", "Manager and staff accounts")],
+            [t("Business onboarding setup", "Business onboarding setup"), "₱500 / business", t("Assisted setup at verification help", "Assisted setup and verification help")],
+            [t("Post boosting", "Post boosting"), t("Mula ₱100", "From ₱100"), t("₱10 dagdag = 30 tao", "₱10 added = 30 people")],
+            [t("Banner ads", "Banner ads"), "₱300 / banner / week", t("Inaasess bago lumabas", "Reviewed before going live")],
+          ].map(([name, price, detail]) => (
+            <li key={name as string} className="flex min-h-16 items-center gap-3 py-2">
+              <span className="flex-1">
+                <span className="block text-[15px] font-semibold">{name as string}</span>
+                <span className="block text-[13px] text-fg-2">{detail as string}</span>
+              </span>
+              <span className="text-right font-display text-[14px] font-bold">{price as string}</span>
+            </li>
+          ))}
+        </ul>
+      </Card>
       <Card
         title={t("Paraan ng pagbayad", "Payment methods")}
         icon={<CreditCard size={20} />}

@@ -333,6 +333,7 @@ export function BusinessDashboard() {
         </div>
         <div className="mx-auto mt-3 flex max-w-[1100px] flex-wrap items-center gap-2 px-5">
           <StatusChip status={status} className="bg-white" />
+          <span className="inline-flex h-7 items-center rounded-full bg-ink/80 px-3 font-display text-[12px] font-semibold text-cream">Sample data</span>
           {b.live && !verified && <span className="inline-flex h-7 items-center rounded-full bg-ink/80 px-3 font-display text-[12px] font-semibold text-cream">{t('Hindi pa verified', 'Not yet verified')}</span>}
         </div>
       </header>

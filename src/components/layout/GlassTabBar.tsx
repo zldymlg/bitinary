@@ -51,7 +51,7 @@ export function GlassTabBar({ tone = 'default' }: { tone?: 'default' | 'dark' })
                 <motion.span whileTap={{ scale: 0.88 }} className="relative">
                   <Icon active={active} />
                 </motion.span>
-                <span className="relative font-display text-[11px] font-medium leading-none">{label(t.to)}</span>
+                <span className="relative whitespace-nowrap font-display text-[10px] font-medium leading-none">{label(t.to)}</span>
               </Link>
             </li>
           )

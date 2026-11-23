@@ -26,7 +26,7 @@ export function Chip({
       onClick={onClick}
       aria-pressed={active}
       className={cn(
-        'inline-flex h-9 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-3.5 font-display text-[14px] font-medium transition-colors',
+        'inline-flex h-11 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-3.5 font-display text-[14px] font-medium transition-colors',
         active
           ? 'bg-primary text-on-primary'
           : tone === 'glass'

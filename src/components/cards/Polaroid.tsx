@@ -1,4 +1,5 @@
 import { motion } from 'motion/react'
+import type { ReactNode } from 'react'
 import type { MomentFrame } from '@/data/moments'
 import { cn } from '@/lib/cn'
 import { shortDate } from '@/lib/format'
@@ -23,6 +24,7 @@ export function Polaroid({
   className,
   onClick,
   developing,
+  actions,
 }: {
   src: string
   caption?: string
@@ -35,6 +37,7 @@ export function Polaroid({
   className?: string
   onClick?: () => void
   developing?: boolean
+  actions?: ReactNode
 }) {
   const f = frameStyles[frame]
   const isFilm = frame === 'film'
@@ -50,7 +53,7 @@ export function Polaroid({
       whileTap={onClick ? { scale: 0.97 } : undefined}
       style={{ rotate: tilt, width, background: f.bg }}
       className={cn(
-        'relative shrink-0 p-[6%] pb-0 [container-type:inline-size] shadow-[0_10px_24px_-8px_rgba(58,26,14,0.45),0_1px_2px_rgba(0,0,0,0.12)]',
+        'relative shrink-0 rounded-[20px] border border-black/[0.06] p-[5%] pb-0 [container-type:inline-size] shadow-[0_12px_30px_-10px_rgba(23,30,44,0.24),0_2px_6px_rgba(23,30,44,0.08)]',
         onClick && 'cursor-pointer',
         className,
       )}
@@ -64,7 +67,15 @@ export function Polaroid({
           </div>
         </>
       )}
-      <div className="relative aspect-square overflow-hidden bg-[#2a2a2a]">
+      {actions && (
+        <div
+          className="absolute right-[7%] top-[7%] z-10 flex items-center gap-1.5"
+          onClick={(event) => event.stopPropagation()}
+        >
+          {actions}
+        </div>
+      )}
+      <div className="relative aspect-square overflow-hidden rounded-[12px] bg-[#2a2a2a]">
         <motion.img
           src={src}
           alt={caption ?? 'Moment'}
@@ -75,10 +86,10 @@ export function Polaroid({
           draggable={false}
         />
       </div>
-      <figcaption className="flex min-h-[24%] flex-col justify-center px-[2%] py-[5%]" style={{ color: f.ink }}>
-        {caption && <span className="line-clamp-1 font-hand text-[clamp(13px,10.5cqw,26px)] leading-tight">{caption}</span>}
+      <figcaption className="flex min-h-[24%] flex-col justify-center gap-0.5 px-[2%] py-[5%]" style={{ color: f.ink }}>
+        {caption && <span className="line-clamp-1 font-display text-[clamp(13px,9cqw,21px)] font-semibold leading-tight">{caption}</span>}
         {(displayDate || place) && (
-          <span className="line-clamp-1 font-hand text-[clamp(11px,7.5cqw,17px)] leading-tight opacity-75">
+          <span className="line-clamp-1 font-display text-[clamp(10px,6.5cqw,14px)] leading-tight opacity-65">
             {[displayDate, place].filter(Boolean).join(' · ')}
           </span>
         )}

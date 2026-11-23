@@ -11,7 +11,7 @@ import {
 
 import { emptyBusiness, type BusinessProfile } from "@/app/account"
 
-import { LangOverride, type Lang } from "@/app/i18n"
+import { deviceLang, LangOverride, type Lang } from "@/app/i18n"
 
 import type { Expression } from "@/components/mascot/Jimbot"
 
@@ -413,9 +413,6 @@ type Ctx = {
 
 const C = createContext<Ctx | null>(null)
 
-const deviceLang = (): Lang =>
-  /^(tl|fil)/i.test(navigator.language) ? "tl" : "en"
-
 const queryLang = (): Lang | null => {
   const l = new URLSearchParams(location.search).get("lang")
 
@@ -713,7 +710,9 @@ export function BizProvider({ children }: { children: ReactNode }) {
 
   const lang: Lang =
     queryLang() ??
-    (data.langPref === "device" ? deviceLang() : (data.langPref ?? "en"))
+    (data.langPref === "device" || data.langPref == null
+      ? deviceLang()
+      : data.langPref)
 
   const t = useCallback(
     (tl: string, en: string) => (lang === "en" ? en : tl),

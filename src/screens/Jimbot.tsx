@@ -2,7 +2,7 @@ import { ArrowUp, ChevronLeft, ChevronRight, Clock3, MapPin, MessageSquareText, 
 import { AnimatePresence, motion } from 'motion/react'
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
-import { useLang } from '@/app/i18n'
+import { useLang, useT } from '@/app/i18n'
 import { BudgetSheet } from '@/components/BudgetSheet'
 import { Jimbot } from '@/components/mascot/Jimbot'
 import { OfflineState } from '@/components/states/States'
@@ -25,16 +25,18 @@ type Conversation = { id: string; updated_at: string; title: string }
 
 const MAX_INPUT = 300
 
-const OFFLINE_TEXT = 'Hindi ako makasagot ngayon. Subukan ulit mamaya.'
-const SAVE_FAIL_TEXT = 'Hindi ko ma-save ang itinerary ngayon. Subukan ulit mamaya.'
+type LangT = (tl: string, en: string) => string
 
-const welcomeMessage: Msg = {
+const offlineText = (t: LangT) => t('Hindi ako makasagot ngayon. Subukan ulit mamaya.', "I can't answer right now. Try again later.")
+const saveFailText = (t: LangT) => t('Hindi ko ma-save ang itinerary ngayon. Subukan ulit mamaya.', "I couldn't save the itinerary. Try again later.")
+
+const welcomeMessage = (t: LangT): Msg => ({
   id: 'welcome',
   role: 'bot',
   expression: 'waving',
-  text: 'Kumusta! Ako si Jimbot. Tutulungan kitang gumawa ng itinerary at mag-budget ng biyahe mo.',
-  quickReplies: ['Gumawa ng itinerary', 'Mag-budget', 'Quezon City'],
-}
+  text: t('Kumusta! Ako si Jimbot. Tutulungan kitang gumawa ng itinerary at mag-budget ng biyahe mo.', "Hi! I'm Jimbot. I'll help you make an itinerary and budget for your trip."),
+  quickReplies: [t('Gumawa ng itinerary', 'Make an itinerary'), t('Mag-budget', 'Set a budget'), 'Quezon City'],
+})
 
 const STRUCTURED_KEYS = ['places', 'itineraryDraft', 'budget', 'map', 'actions', 'warnings', 'refusal', 'quickReplies'] as const
 
@@ -44,7 +46,7 @@ export function JimbotScreen() {
 
 export function JimbotChat({ embedded }: { embedded?: boolean }) {
   const { t } = useLang()
-  const [messages, setMessages] = useState<Msg[]>([welcomeMessage])
+  const [messages, setMessages] = useState<Msg[]>(() => [welcomeMessage(t)])
   const [thinking, setThinking] = useState(false)
   const [input, setInput] = useState('')
   const [budgetOpen, setBudgetOpen] = useState(false)
@@ -114,7 +116,7 @@ export function JimbotChat({ embedded }: { embedded?: boolean }) {
       }
       const conversationList = conversations.map((conversation) => ({
         ...conversation,
-        title: firstMessage.get(conversation.id)?.slice(0, 52) || 'Bagong usapan',
+        title: firstMessage.get(conversation.id)?.slice(0, 52) || t('Bagong usapan', 'New chat'),
       }))
       setHistory(conversationList)
       setHistoryLoading(false)
@@ -144,7 +146,7 @@ export function JimbotChat({ embedded }: { embedded?: boolean }) {
       return
     }
     if (!isActive()) return
-    const restored: Msg[] = [welcomeMessage]
+    const restored: Msg[] = [welcomeMessage(t)]
     for (const message of data ?? []) {
       if (message.intent?.startsWith('feedback_')) continue
       if (message.role === 'user') {
@@ -179,7 +181,7 @@ export function JimbotChat({ embedded }: { embedded?: boolean }) {
       createdConversation = true
     }
     const id = conversationId.current
-    if (!id) throw new Error('Hindi nagawa ang pag-uusap ni Jimbot.')
+    if (!id) throw new Error(t('Hindi nagawa ang pag-uusap ni Jimbot.', "Couldn't create the Jimbot conversation."))
     const row = { conversation_id: id, user_id: auth.user.id, role, intent, content }
     let { error } = await supabase.from('jimbot_messages').insert((payload ? { ...row, payload } : row) as typeof row)
     // Best-effort: payload column may not exist yet; retry without it.
@@ -193,7 +195,7 @@ export function JimbotChat({ embedded }: { embedded?: boolean }) {
       const next = {
         id,
         updated_at: updatedAt,
-        title: createdConversation && role === 'user' ? content.slice(0, 52) : existing?.title ?? 'Bagong usapan',
+        title: createdConversation && role === 'user' ? content.slice(0, 52) : existing?.title ?? t('Bagong usapan', 'New chat'),
       }
       return [next, ...current.filter((conversation) => conversation.id !== id)].slice(0, 30)
     })
@@ -225,7 +227,7 @@ export function JimbotChat({ embedded }: { embedded?: boolean }) {
       await saveMessage('user', clean, 'user')
 
       if (!online) {
-        pushOffline(OFFLINE_TEXT)
+        pushOffline(offlineText(t))
         return
       }
 
@@ -270,13 +272,13 @@ export function JimbotChat({ embedded }: { embedded?: boolean }) {
         return
       }
 
-      const failText = opts.explicitConfirmed ? SAVE_FAIL_TEXT : OFFLINE_TEXT
+      const failText = opts.explicitConfirmed ? saveFailText(t) : offlineText(t)
       pushOffline(failText)
       pendingShare.current = false
       await saveMessage('bot', failText, 'offline')
     } catch (error) {
       console.error('Jimbot request failed', error)
-      pushOffline(OFFLINE_TEXT)
+      pushOffline(offlineText(t))
     } finally {
       setThinking(false)
     }
@@ -285,14 +287,14 @@ export function JimbotChat({ embedded }: { embedded?: boolean }) {
   const sendFeedback = async (messageId: string, value: 'up' | 'down') => {
     try {
       const saved = await saveMessage('user', `Jimbot response ${messageId}: ${value === 'up' ? 'helpful' : 'not helpful'}`, `feedback_${value}`)
-      if (!saved) throw new Error('Mag-sign in para maitala ang feedback.')
+      if (!saved) throw new Error(t('Mag-sign in para maitala ang feedback.', 'Sign in to save feedback.'))
       setMessages((current) => current.map((message) => (message.id === messageId && message.role === 'bot' ? { ...message, feedback: value, feedbackError: undefined } : message)))
     } catch (error) {
       console.error('Jimbot feedback save failed', error)
       setMessages((current) =>
         current.map((message) =>
           message.id === messageId && message.role === 'bot'
-            ? { ...message, feedbackError: error instanceof Error ? error.message : 'Hindi na-save ang feedback. Subukan ulit.' }
+            ? { ...message, feedbackError: error instanceof Error ? error.message : t('Hindi na-save ang feedback. Subukan ulit.', "Feedback wasn't saved. Try again.") }
             : message,
         ),
       )
@@ -303,7 +305,7 @@ export function JimbotChat({ embedded }: { embedded?: boolean }) {
     if (thinking || switchingConversation) return
     conversationId.current = undefined
     planningRef.current = null
-    setMessages([welcomeMessage])
+    setMessages([welcomeMessage(t)])
     setInput('')
     setConversationError(false)
     setHistoryOpen(false)
@@ -317,7 +319,7 @@ export function JimbotChat({ embedded }: { embedded?: boolean }) {
         <div className={cn('mx-auto flex items-center gap-2 px-4 pb-3 pt-[max(12px,env(safe-area-inset-top))]', !embedded && 'max-w-[760px] md:px-6 md:pt-6')}>
           <button
             type="button"
-            aria-label={historyOpen ? 'Isara ang mga usapan' : 'Buksan ang mga usapan'}
+            aria-label={historyOpen ? t('Isara ang mga usapan', 'Close conversations') : t('Buksan ang mga usapan', 'Open conversations')}
             aria-expanded={historyOpen}
             onClick={() => setHistoryOpen((open) => !open)}
             className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-fg-2 transition-colors hover:bg-sunken"
@@ -329,13 +331,13 @@ export function JimbotChat({ embedded }: { embedded?: boolean }) {
             <h1 className="flex items-center gap-2 text-h2">
               Jimbot <PhaseTag phase="MVP" />
             </h1>
-            <p className="text-caption text-fg-2">{online ? 'AI travel buddy mo · itinerary at budget' : 'Offline'}</p>
+            <p className="text-caption text-fg-2">{online ? t('AI travel buddy mo · itinerary at budget', 'Your AI travel buddy · itinerary and budget') : t('Offline', 'Offline')}</p>
           </div>
-          <Button size="sm" variant="secondary" icon={<Plus size={16} />} onClick={startNewConversation} disabled={thinking || switchingConversation || historyLoading}>
-            Bago
+          <Button size="sm" variant="secondary" icon={<Plus size={16} />} onClick={startNewConversation} disabled={thinking || switchingConversation || historyLoading} aria-label={t('Bago', 'New')}>
+            <span className="hidden sm:inline">{t('Bago', 'New')}</span>
           </Button>
-          <Button size="sm" variant="secondary" icon={<PiggyBank size={16} />} onClick={() => setBudgetOpen(true)}>
-            Budget
+          <Button size="sm" variant="secondary" icon={<PiggyBank size={16} />} onClick={() => setBudgetOpen(true)} aria-label="Budget">
+            <span className="hidden sm:inline">Budget</span>
           </Button>
         </div>
       </header>
@@ -345,9 +347,9 @@ export function JimbotChat({ embedded }: { embedded?: boolean }) {
           <aside className={cn('absolute inset-y-0 left-0 z-30 flex w-[min(280px,85vw)] flex-col border-r border-line bg-bg shadow-float md:w-[260px]', !embedded && 'md:static md:shadow-none')}>
             <div className="flex items-center justify-between border-b border-line px-4 py-3">
               <h2 className="flex items-center gap-2 font-display text-[15px] font-semibold">
-                <Clock3 size={17} className="text-link" /> Mga usapan
+                <Clock3 size={17} className="text-link" /> {t('Mga usapan', 'Conversations')}
               </h2>
-              <button type="button" aria-label="Isara ang mga usapan" onClick={() => setHistoryOpen(false)} className="flex h-9 w-9 items-center justify-center rounded-full text-fg-2 hover:bg-sunken">
+              <button type="button" aria-label={t('Isara ang mga usapan', 'Close conversations')} onClick={() => setHistoryOpen(false)} className="flex h-9 w-9 items-center justify-center rounded-full text-fg-2 hover:bg-sunken">
                 <ChevronLeft size={19} />
               </button>
             </div>
@@ -362,7 +364,7 @@ export function JimbotChat({ embedded }: { embedded?: boolean }) {
                   ))}
                 </div>
               ) : historyError ? (
-                <p role="alert" className="px-3 py-4 text-sm text-danger">Hindi ma-load ang kasaysayan ng usapan.</p>
+                <p role="alert" className="px-3 py-4 text-sm text-danger">{t('Hindi ma-load ang kasaysayan ng usapan.', "Couldn't load the conversation history.")}</p>
               ) : history.length ? (
                 <ul className="space-y-1">
                   {history.map((conversation) => (
@@ -384,22 +386,22 @@ export function JimbotChat({ embedded }: { embedded?: boolean }) {
                   ))}
                 </ul>
               ) : (
-                <p className="px-3 py-4 text-sm text-fg-2">Wala pang naka-save na usapan.</p>
+                <p className="px-3 py-4 text-sm text-fg-2">{t('Wala pang naka-save na usapan.', 'No saved conversations yet.')}</p>
               )}
             </div>
           </aside>
         )}
         <section className="flex min-w-0 flex-1 flex-col">
           {!online ? (
-            <OfflineState body="Kailangan ni Jimbot ng internet para gumawa ng bagong plano. Bukas pa rin ang mga naka-save mong itinerary." />
+            <OfflineState body={t('Kailangan ni Jimbot ng internet para gumawa ng bagong plano. Bukas pa rin ang mga naka-save mong itinerary.', 'Jimbot needs internet to make a new plan. Your saved itineraries are still available.')} />
           ) : (
             <div ref={listRef} className={cn('mx-auto w-full flex-1 space-y-4 px-4 pb-4 pt-4', !embedded && 'max-w-[760px] md:px-6')} aria-live="polite">
               {switchingConversation ? (
-                <p className="text-center text-caption text-fg-2">Binubuksan ang usapan…</p>
+                <p className="text-center text-caption text-fg-2">{t('Binubuksan ang usapan…', 'Opening conversation…')}</p>
               ) : (
                 <>
-                  {conversationError && <p role="alert" className="text-center text-sm text-danger">Hindi ma-load ang usapan. Subukan itong buksan ulit.</p>}
-                  <p className="text-center text-caption text-fg-2">Ngayon · Tagalog, Bisaya, at English</p>
+                  {conversationError && <p role="alert" className="text-center text-sm text-danger">{t('Hindi ma-load ang usapan. Subukan itong buksan ulit.', "Couldn't load the conversation. Try opening it again.")}</p>}
+                  <p className="text-center text-caption text-fg-2">{t('Ngayon', 'Today')}</p>
                   {messages.map((m) =>
                     m.role === 'user' ? (
                       <UserBubble key={m.id} text={m.text} />
@@ -408,6 +410,7 @@ export function JimbotChat({ embedded }: { embedded?: boolean }) {
                         key={m.id}
                         msg={m}
                         showQuickReplies={m.id === lastBotId && !thinking}
+                        showFeedback={m.id === lastBotId && !thinking}
                         onPick={send}
                         onFeedback={(value) => sendFeedback(m.id, value)}
                         onOpenBusiness={(id) => navigate(`/shop/${id}`)}
@@ -422,12 +425,12 @@ export function JimbotChat({ embedded }: { embedded?: boolean }) {
                             return
                           }
                           pendingShare.current = true
-                          void send('Sige, i-save mo na ang itinerary.', { explicitConfirmed: true })
+                          void send(t('Sige, i-save mo na ang itinerary.', 'Yes, save the itinerary.'), { explicitConfirmed: true })
                         }}
                         savedId={savedIds[m.id]}
                         onAction={(a) => {
-                          if (a.type === 'confirm_save') void send('Sige, i-save mo na ang itinerary.', { explicitConfirmed: true })
-                          else if (a.type === 'revise_cheaper') void send('Pwede bang mas mura ang version nito?')
+                          if (a.type === 'confirm_save') void send(t('Sige, i-save mo na ang itinerary.', 'Yes, save the itinerary.'), { explicitConfirmed: true })
+                          else if (a.type === 'revise_cheaper') void send(t('Pwede bang mas mura ang version nito?', 'Can you make a cheaper version?'))
                           else if (a.type === 'open_business' && a.businessId) navigate(`/shop/${a.businessId}`)
                           else if (a.type === 'open_help') navigate('/account/help')
                           else if (a.type === 'open_map') {
@@ -454,18 +457,18 @@ export function JimbotChat({ embedded }: { embedded?: boolean }) {
                 className="flex items-center gap-2 px-4 pb-3"
               >
                 <label className="glass flex h-12 flex-1 items-center rounded-full pl-4 pr-1.5 shadow-float">
-                  <span className="sr-only">Mensahe kay Jimbot</span>
+                  <span className="sr-only">{t('Mensahe kay Jimbot', 'Message Jimbot')}</span>
                   <input
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
                     maxLength={MAX_INPUT}
-                    placeholder="Itanong kay Jimbot…"
+                    placeholder={t('Itanong kay Jimbot…', 'Ask Jimbot…')}
                     disabled={!online || switchingConversation}
-                    className="h-full min-w-0 flex-1 bg-transparent text-[16px] text-fg outline-none placeholder:text-fg-2"
+                    className="h-full min-w-0 flex-1 bg-transparent text-[16px] text-fg placeholder:text-fg-2"
                   />
                   <button
                     type="submit"
-                    aria-label="Ipadala"
+                    aria-label={t('Ipadala', 'Send')}
                     disabled={!input.trim() || thinking || switchingConversation}
                     className="flex h-10 w-10 items-center justify-center rounded-full bg-deep text-white transition-opacity disabled:opacity-40"
                   >
@@ -492,11 +495,12 @@ function UserBubble({ text }: { text: string }) {
 }
 
 function Thinking() {
+  const t = useT()
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="flex items-end gap-2">
       <Jimbot expression="thinking" variant="standalone" size={84} />
       <div className="card mb-3 flex items-center gap-1.5 rounded-[22px] rounded-bl-md px-4 py-3">
-        <span className="text-[15px] text-fg-2">Gumagawa ng plano</span>
+        <span className="text-[15px] text-fg-2">{t('Gumagawa ng plano', 'Making a plan')}</span>
         {[0, 1, 2].map((i) => (
           <motion.span key={i} className="h-1.5 w-1.5 rounded-full bg-primary" animate={{ opacity: [0.2, 1, 0.2] }} transition={{ duration: 1, repeat: Infinity, delay: i * 0.18 }} />
         ))}
@@ -508,6 +512,7 @@ function Thinking() {
 function BotReply({
   msg,
   showQuickReplies,
+  showFeedback,
   onPick,
   onFeedback,
   onOpenResult,
@@ -524,11 +529,13 @@ function BotReply({
   savedId?: string
   msg: BotMsg
   showQuickReplies: boolean
+  showFeedback: boolean
   onPick: (text: string) => void
   onFeedback: (value: 'up' | 'down') => void
   onOpenResult: (result: ChatResult) => void
 }) {
   const navigate = useNavigate()
+  const t = useT()
   const big = msg.expression === 'unsure'
   const resultsTrackRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<HTMLElement>(null)
@@ -566,7 +573,7 @@ function BotReply({
       )}
       <div className="min-w-0 flex-1 space-y-2">
         <div className={cn('card rounded-[22px] rounded-tl-md px-4 py-3', big && 'border-2 border-dashed border-caution/50')}>
-          {big && <p className="mb-1 font-display text-[15px] font-semibold text-caution">Hindi ako sigurado</p>}
+          {big && <p className="mb-1 font-display text-[15px] font-semibold text-caution">{t('Hindi ako sigurado', "I'm not sure")}</p>}
           <p className="text-[16px] leading-6">{msg.text}</p>
         </div>
         {msg.itineraryDraft?.days?.length ? (
@@ -579,7 +586,7 @@ function BotReply({
               saved={Boolean(savedId)}
               focusMapToken={focusMapToken || undefined}
               onOpenBusiness={onOpenBusiness}
-              onSave={() => onAction({ type: 'confirm_save', label: 'I-save', businessId: null })}
+              onSave={() => onAction({ type: 'confirm_save', label: t('I-save', 'Save'), businessId: null })}
               onShare={() => onShare(msg)}
               onRefine={(text) => onRefine(text)}
             />
@@ -595,7 +602,7 @@ function BotReply({
         )}
         {msg.refusal && (
           <button type="button" onClick={() => navigate('/account/help')} className="text-sm font-medium text-link">
-            Kailangan ng tao?
+            {t('Kailangan ng tao?', 'Need a human?')}
           </button>
         )}
         {msg.warnings?.map((w, i) => (
@@ -607,12 +614,12 @@ function BotReply({
             {hasCarousel && (
               <div className="flex items-center justify-between px-1">
                 <p className="text-xs font-semibold text-fg-2">
-                  {msg.results.length} resulta · swipe para makita lahat
+                  {msg.results.length} {t('resulta · swipe para makita lahat', 'results · swipe to see all')}
                 </p>
                 <div className="flex gap-1">
                   <button
                     type="button"
-                    aria-label="Mga naunang resulta"
+                    aria-label={t('Mga naunang resulta', 'Previous results')}
                     onClick={() => scrollResults(-1)}
                     className="flex h-8 w-8 items-center justify-center rounded-full border border-line text-fg-2 transition hover:bg-surface"
                   >
@@ -620,7 +627,7 @@ function BotReply({
                   </button>
                   <button
                     type="button"
-                    aria-label="Mga susunod na resulta"
+                    aria-label={t('Mga susunod na resulta', 'Next results')}
                     onClick={() => scrollResults(1)}
                     className="flex h-8 w-8 items-center justify-center rounded-full border border-line text-fg-2 transition hover:bg-surface"
                   >
@@ -632,7 +639,7 @@ function BotReply({
             <div
               ref={hasCarousel ? resultsTrackRef : undefined}
               role={hasCarousel ? 'region' : undefined}
-              aria-label={hasCarousel ? 'Mga resulta sa carousel' : undefined}
+              aria-label={hasCarousel ? t('Mga resulta sa carousel', 'Results carousel') : undefined}
               tabIndex={hasCarousel ? 0 : undefined}
               className={hasCarousel ? 'no-scrollbar flex snap-x snap-mandatory gap-3 overflow-x-auto pb-2' : 'space-y-2'}
             >
@@ -661,13 +668,13 @@ function BotReply({
             ))}
           </div>
         )}
-        {msg.id !== 'welcome' && (
+        {showFeedback && msg.id !== 'welcome' && (
           <div className="flex items-center gap-2 pt-1">
-            <span className="text-[12px] text-fg-2">Nakatulong ba ito?</span>
-            <button type="button" aria-label="Nakatulong" aria-pressed={msg.feedback === 'up'} onClick={() => onFeedback('up')} className={cn('rounded-full p-1.5 text-fg-2 hover:bg-surface', msg.feedback === 'up' && 'bg-primary/15 text-primary')}>
+            <span className="text-[12px] text-fg-2">{t('Nakatulong ba ito?', 'Did this help?')}</span>
+            <button type="button" aria-label={t('Nakatulong', 'Helpful')} aria-pressed={msg.feedback === 'up'} onClick={() => onFeedback('up')} className={cn('rounded-full p-1.5 text-fg-2 hover:bg-surface', msg.feedback === 'up' && 'bg-primary/15 text-primary')}>
               <ThumbsUp size={15} />
             </button>
-            <button type="button" aria-label="Hindi nakatulong" aria-pressed={msg.feedback === 'down'} onClick={() => onFeedback('down')} className={cn('rounded-full p-1.5 text-fg-2 hover:bg-surface', msg.feedback === 'down' && 'bg-primary/15 text-primary')}>
+            <button type="button" aria-label={t('Hindi nakatulong', 'Not helpful')} aria-pressed={msg.feedback === 'down'} onClick={() => onFeedback('down')} className={cn('rounded-full p-1.5 text-fg-2 hover:bg-surface', msg.feedback === 'down' && 'bg-primary/15 text-primary')}>
               <ThumbsDown size={15} />
             </button>
             {msg.feedbackError && <span role="alert" className="text-xs text-danger">{msg.feedbackError}</span>}
@@ -688,6 +695,7 @@ function ResultCard({
   layout?: 'list' | 'carousel'
 }) {
   const [photoFailed, setPhotoFailed] = useState(false)
+  const t = useT()
   const carousel = layout === 'carousel'
 
   if (result.kind === 'itinerary') {
@@ -765,7 +773,7 @@ function ResultCard({
         <span className="block truncate font-semibold">{result.name}</span>
         <span className="block truncate text-sm text-fg-2">{[result.type, result.city, result.priceRange].filter(Boolean).join(' · ')}</span>
         {result.address && <span className="block truncate text-xs text-fg-2">{result.address}</span>}
-        {carousel && <span className="mt-2 block text-xs font-semibold text-link">Tingnan ang profile →</span>}
+        {carousel && <span className="mt-2 block text-xs font-semibold text-link">{t('Tingnan ang profile →', 'View profile →')}</span>}
       </span>
       {!carousel && result.verified && (
         <span className="shrink-0 rounded-full bg-primary/15 px-2 py-1 text-[11px] font-semibold text-primary">Verified</span>

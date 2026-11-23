@@ -52,7 +52,7 @@ export function ProfileSheet({ open, onClose, title, footer, children, className
   }
 
   return (
-    <Offcanvas show={open} onHide={onClose} placement="bottom" aria-labelledby={id} className={cn('h-auto max-h-[92dvh] rounded-t-[28px] bg-surface pb-safe text-fg shadow-float outline-none focus:outline-none focus-visible:outline-none', className)}>
+    <Offcanvas show={open} onHide={onClose} placement="bottom" aria-labelledby={id} className={cn('h-auto max-h-[92dvh] rounded-t-[28px] bg-surface pb-safe text-fg shadow-float', className)}>
       <div className="flex shrink-0 cursor-grab touch-none flex-col items-center pt-2 active:cursor-grabbing" onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up}>
         <span className="h-[5px] w-10 rounded-full bg-line dark:bg-white/20" aria-hidden />
         <Offcanvas.Header closeButton closeLabel="Isara" className="w-full px-5 pb-1 pt-3">

@@ -43,9 +43,14 @@ type ToolResult = {
   [key: string]: unknown;
 };
 
-const OPENAI_MODEL = Deno.env.get("OPENAI_MODEL") ?? "gpt-4.1-mini";
+const OPENCODE_MODEL = Deno.env.get("OPENCODE_MODEL") ?? "hy4-flash-free";
+const OPENCODE_BASE_URL = Deno.env.get("OPENCODE_BASE_URL") ?? "https://opencode.ai/zen/go/v1";
+const OPENCODE_API_KEY = Deno.env.get("OPENCODE_API_KEY");
 const MAX_TOOL_ROUNDS = 2; // total model calls = 1 initial + up to 2 continuations
-const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
+const EMBEDDING_API_KEY = Deno.env.get("EMBEDDING_API_KEY");
+const EMBEDDING_BASE_URL = (Deno.env.get("EMBEDDING_BASE_URL") ?? "https://openrouter.ai/api/v1").replace(/\/$/, "");
+const EMBEDDING_MODEL = Deno.env.get("EMBEDDING_MODEL") ?? "nvidia/nemotron-3.5-embed-1b:free";
+const EMBEDDING_DIMENSIONS = 1536; // business_embeddings.embedding is vector(1536)
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY");
 
@@ -56,12 +61,14 @@ if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
 // Bundle static assets via imports — Deno.readTextFile fails under supabase functions serve
 // (compile dir only has the TS entry, not sibling .md/.json files).
 
-const RESPONSE_SCHEMA_FOR_OPENAI = sanitizeSchemaForOpenAI(RESPONSE_SCHEMA_RAW);
-const TOOLS_FOR_OPENAI = sanitizeToolsForOpenAI(TOOLS);
+const TOOLS_FOR_CHAT = buildChatTools(TOOLS);
 const ajv = new Ajv2020({ allErrors: true, strict: false });
 const validateFinalResponse = ajv.compile(withServerOnlyDraftFields(RESPONSE_SCHEMA_RAW));
 
-const openai = OPENAI_API_KEY ? new OpenAI({ apiKey: OPENAI_API_KEY }) : null;
+// OpenAI SDK used as an OpenAI-compatible client for the OpenCode gateway.
+const client = OPENCODE_API_KEY
+  ? new OpenAI({ apiKey: OPENCODE_API_KEY, baseURL: OPENCODE_BASE_URL })
+  : null;
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -127,6 +134,15 @@ Deno.serve(async (req) => {
   const supabase = createSupabaseClient(bearerToken);
   const userId = await getUserId(supabase);
 
+  // OpenCode Go routes by conversation and needs a distinct user agent.
+  const modelRequestHeaders = {
+    "User-Agent": "bitinary-jimbot/1.0",
+    "x-opencode-session":
+      typeof body.conversationId === "string" && body.conversationId.trim()
+        ? body.conversationId.trim()
+        : `jimbot-${userId ?? "anon"}`,
+  };
+
   const idempotencyKey = req.headers.get("x-idempotency-key");
   const trustedBusinessIds = new Set<string>();
   // Seed from client planningContext (last draft/places), then re-verify live+verified in DB.
@@ -178,47 +194,52 @@ Deno.serve(async (req) => {
     }, 200);
   }
 
-  if (!openai) {
-    console.error("jimbot: OPENAI_API_KEY missing");
+  if (!client) {
+    console.error("jimbot: OPENCODE_API_KEY missing");
     return jsonResponse(FALLBACK_RESPONSE, 200);
   }
 
   try {
-    const modelInput = buildModelInput(body);
+    const messages = buildChatMessages(body);
 
-    let response = await openai.responses.create({
-      model: OPENAI_MODEL,
-      instructions: SYSTEM_PROMPT,
-      input: modelInput,
-      tools: TOOLS_FOR_OPENAI as any,
-      text: {
-        format: {
-          type: "json_schema",
-          name: "jimbot_response",
-          strict: true,
-          schema: RESPONSE_SCHEMA_FOR_OPENAI as any,
-        },
+    let response = await client.chat.completions.create(
+      {
+        model: OPENCODE_MODEL,
+        messages: messages as any,
+        tools: TOOLS_FOR_CHAT as any,
       },
-    });
+      { headers: modelRequestHeaders },
+    );
 
     let earlyPlan: Record<string, unknown> | null = null;
     // Skip early synth on save confirms (handled above); keep for normal plan asks.
     const wantsPlan = looksLikePlanRequest(body.message);
 
     for (let i = 0; i < MAX_TOOL_ROUNDS; i += 1) {
-      const functionCalls = (response.output ?? []).filter((item: any) => item.type === "function_call");
-      if (functionCalls.length === 0) {
+      const assistantMessage = response.choices?.[0]?.message;
+      const calls = assistantMessage?.tool_calls ?? [];
+      if (calls.length === 0) {
         break;
       }
 
-      const toolOutputs = [];
-      for (const call of functionCalls) {
-        const toolResult = await runToolCall(call, toolContext);
-        toolOutputs.push({
-          type: "function_call_output",
-          call_id: call.call_id,
-          output: JSON.stringify(toolResult),
-        });
+      messages.push({
+        role: "assistant",
+        content: assistantMessage.content ?? null,
+        tool_calls: calls,
+      } as any);
+      for (const call of calls) {
+        const toolResult = await runToolCall(
+          {
+            name: call.function?.name,
+            arguments: call.function?.arguments,
+          },
+          toolContext,
+        );
+        messages.push({
+          role: "tool",
+          tool_call_id: call.id,
+          content: JSON.stringify(toolResult),
+        } as any);
       }
 
       // Prefer correctness + latency: once search returned enough places for a plan, synthesize locally.
@@ -233,38 +254,22 @@ Deno.serve(async (req) => {
       // Last continuation: omit tools so the model must emit structured JSON (still within 3 calls).
       const isLastRound = i === MAX_TOOL_ROUNDS - 1;
       if (isLastRound) {
-        console.error("jimbot: tool loop final round — forcing structured output without tools");
+        console.error("jimbot: tool loop final round, forcing structured output without tools");
+        messages.push({
+          role: "user",
+          content:
+            "Stop calling tools. Return the final jimbot_response JSON now using only verified business IDs from tool results. Include itineraryDraft, budget, map, and confirm_save when this is a plan request.",
+        });
       }
 
-      response = await openai.responses.create({
-        model: OPENAI_MODEL,
-        previous_response_id: response.id,
-        input: isLastRound
-          ? [
-              ...toolOutputs,
-              {
-                type: "message",
-                role: "user",
-                content: [
-                  {
-                    type: "input_text",
-                    text:
-                      "Stop calling tools. Return the final jimbot_response JSON now using only verified business IDs from tool results. Include itineraryDraft, budget, map, and confirm_save when this is a plan request.",
-                  },
-                ],
-              },
-            ]
-          : toolOutputs,
-        ...(isLastRound ? {} : { tools: TOOLS_FOR_OPENAI as any }),
-        text: {
-          format: {
-            type: "json_schema",
-            name: "jimbot_response",
-            strict: true,
-            schema: RESPONSE_SCHEMA_FOR_OPENAI as any,
-          },
+      response = await client.chat.completions.create(
+        {
+          model: OPENCODE_MODEL,
+          messages: messages as any,
+          ...(isLastRound ? {} : { tools: TOOLS_FOR_CHAT as any }),
         },
-      });
+        { headers: modelRequestHeaders },
+      );
     }
 
     let parsed = earlyPlan ?? parseStructuredResponse(response);
@@ -274,7 +279,10 @@ Deno.serve(async (req) => {
     }
     if (!parsed) {
       console.error("jimbot: failed to parse structured response", {
-        outputTypes: (response.output ?? []).map((item: any) => item?.type),
+        finishReason: response.choices?.[0]?.finish_reason,
+        toolCalls: (response.choices?.[0]?.message?.tool_calls ?? []).map(
+          (call: any) => call?.function?.name,
+        ),
         trustedCount: toolContext.trustedBusinessIds.size,
       });
       return jsonResponse(FALLBACK_RESPONSE, 200);
@@ -297,7 +305,7 @@ Deno.serve(async (req) => {
     }
     return jsonResponse(sanitized, 200);
   } catch (error) {
-    console.error("jimbot: OpenAI loop failed", error);
+    console.error("jimbot: OpenCode loop failed", error);
     return jsonResponse(FALLBACK_RESPONSE, 200);
   }
 });
@@ -353,14 +361,26 @@ function checkRateLimit(req: Request): { ok: boolean; retryAfterSeconds?: number
   return { ok: true };
 }
 
-function buildModelInput(body: JimbotRequest): unknown[] {
-  const input: unknown[] = [];
+type ChatMessage = {
+  role: "system" | "user" | "assistant" | "tool";
+  content: string | null;
+  tool_calls?: unknown;
+  tool_call_id?: string;
+};
+
+function buildChatMessages(body: JimbotRequest): ChatMessage[] {
+  const messages: ChatMessage[] = [
+    {
+      role: "system",
+      content: `${SYSTEM_PROMPT}\n\n## Output schema\n\nReply with only JSON that validates against this JSON Schema. No prose, no markdown fences.\n\n${JSON.stringify(RESPONSE_SCHEMA_RAW)}`,
+    },
+  ];
 
   if (Array.isArray(body.history)) {
     for (const item of body.history.slice(-12)) {
       if (!item || typeof item.content !== "string") continue;
       if (item.role !== "user" && item.role !== "assistant") continue;
-      input.push({ role: item.role, content: item.content });
+      messages.push({ role: item.role, content: item.content });
     }
   }
 
@@ -370,17 +390,12 @@ function buildModelInput(body: JimbotRequest): unknown[] {
     explicitConfirmed: body.explicitConfirmed === true,
   };
 
-  input.push({
+  messages.push({
     role: "user",
-    content: [
-      {
-        type: "input_text",
-        text: `User message: ${body.message}\n\nRuntime context JSON:\n${JSON.stringify(metadata)}`,
-      },
-    ],
+    content: `User message: ${body.message}\n\nRuntime context JSON:\n${JSON.stringify(metadata)}`,
   });
 
-  return input;
+  return messages;
 }
 
 async function runToolCall(call: any, context: ToolContext): Promise<ToolResult> {
@@ -429,17 +444,26 @@ function businessTypePatterns(raw: string): string[] {
   return [needle];
 }
 
+/** Nemotron returns 2048 dims; the vector column is 1536. Truncate + re-L2-normalize. */
+function fitEmbedding(embedding: unknown): number[] | null {
+  if (!Array.isArray(embedding) || embedding.length < EMBEDDING_DIMENSIONS) return null;
+  const vector = (embedding as number[]).slice(0, EMBEDDING_DIMENSIONS);
+  const norm = Math.sqrt(vector.reduce((sum, n) => sum + n * n, 0));
+  if (!Number.isFinite(norm) || norm === 0) return null;
+  return vector.map((n) => n / norm);
+}
+
 async function embedQueryText(text: string): Promise<number[] | null> {
-  if (!OPENAI_API_KEY || !text.trim()) return null;
+  if (!EMBEDDING_API_KEY || !text.trim()) return null;
   try {
-    const res = await fetch("https://api.openai.com/v1/embeddings", {
+    const res = await fetch(`${EMBEDDING_BASE_URL}/embeddings`, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${OPENAI_API_KEY}`,
+        Authorization: `Bearer ${EMBEDDING_API_KEY}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: Deno.env.get("OPENAI_EMBEDDING_MODEL") ?? "text-embedding-3-small",
+        model: EMBEDDING_MODEL,
         input: text.slice(0, 2000),
       }),
     });
@@ -448,8 +472,9 @@ async function embedQueryText(text: string): Promise<number[] | null> {
       return null;
     }
     const json = await res.json();
-    const embedding = json?.data?.[0]?.embedding;
-    return Array.isArray(embedding) ? embedding : null;
+    const embedding = fitEmbedding(json?.data?.[0]?.embedding);
+    if (!embedding) console.error("jimbot: embedding dimensions mismatch, using ilike fallback");
+    return embedding;
   } catch (error) {
     console.error("jimbot: embedding failed", error);
     return null;
@@ -1463,28 +1488,48 @@ function collectBusinessIds(payload: any): string[] {
 }
 
 function parseStructuredResponse(response: any): Record<string, unknown> | null {
-  const outputText = response?.output_text;
-  if (typeof outputText === "string") {
+  const content = response?.choices?.[0]?.message?.content;
+  if (typeof content !== "string") return null;
+  const trimmed = content.trim();
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    // Some gateways wrap JSON in a markdown fence or add surrounding prose.
+  }
+  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fenced) {
     try {
-      return JSON.parse(outputText);
+      return JSON.parse(fenced[1].trim());
+    } catch {
+      // fall through to brace extraction
+    }
+  }
+  const start = trimmed.indexOf("{");
+  const end = trimmed.lastIndexOf("}");
+  if (start >= 0 && end > start) {
+    try {
+      return JSON.parse(trimmed.slice(start, end + 1));
     } catch {
       return null;
     }
   }
-
-  const message = (response?.output ?? []).find((item: any) => item.type === "message");
-  const textChunk = message?.content?.find((chunk: any) => chunk.type === "output_text");
-  if (typeof textChunk?.text !== "string") {
-    return null;
-  }
-  try {
-    return JSON.parse(textChunk.text);
-  } catch {
-    return null;
-  }
+  return null;
 }
 
-/** Strip keywords OpenAI function tools reject (e.g. uniqueItems). */
+/** Convert tools.json to Chat Completions function tools. */
+function buildChatTools(tools: unknown): unknown {
+  if (!Array.isArray(tools)) return [];
+  return tools.map((tool: any) => ({
+    type: "function",
+    function: {
+      name: tool.name,
+      description: tool.description,
+      parameters: sanitizeToolsForOpenAI(tool.parameters),
+    },
+  }));
+}
+
+/** Strip keywords function tools reject (e.g. uniqueItems). */
 function sanitizeToolsForOpenAI(tools: unknown): unknown {
   if (Array.isArray(tools)) {
     return tools.map(sanitizeToolsForOpenAI);
@@ -1501,7 +1546,7 @@ function sanitizeToolsForOpenAI(tools: unknown): unknown {
   return clean;
 }
 
-/** Server-added draft fields the model never emits (kept out of the OpenAI strict schema). */
+/** Server-added draft fields the model never emits (kept out of the response schema sent to the model). */
 function withServerOnlyDraftFields(schema: any): any {
   const clone = structuredClone(schema);
   const draft = clone?.properties?.itineraryDraft;
@@ -1517,51 +1562,6 @@ function withServerOnlyDraftFields(schema: any): any {
     lineProps.costState = { type: "string", enum: ["listed", "estimated", "unknown"] };
   }
   return clone;
-}
-
-function sanitizeSchemaForOpenAI(schema: unknown): unknown {
-  if (Array.isArray(schema)) {
-    return schema.map(sanitizeSchemaForOpenAI);
-  }
-  if (!schema || typeof schema !== "object") {
-    return schema;
-  }
-
-  const obj = schema as Record<string, unknown>;
-  const type = obj.type;
-
-  // OpenAI strict json_schema rejects type:["object","null"] with sibling properties/required.
-  // Rewrite nullable objects as anyOf[{object...},{null}].
-  if (
-    Array.isArray(type) &&
-    type.includes("object") &&
-    type.includes("null") &&
-    obj.properties &&
-    typeof obj.properties === "object"
-  ) {
-    const objectSchema: Record<string, unknown> = {
-      type: "object",
-      properties: sanitizeSchemaForOpenAI(obj.properties),
-      additionalProperties: obj.additionalProperties ?? false,
-    };
-    if (Array.isArray(obj.required)) {
-      objectSchema.required = obj.required;
-    }
-    return { anyOf: [objectSchema, { type: "null" }] };
-  }
-
-  // Only strip schema meta keywords — never "title"/"description" property NAMES
-  // (those are real fields on itineraryDraft and would break OpenAI strict required).
-  const blockedKeys = new Set(["$schema", "examples", "default"]);
-  const clean: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(obj)) {
-    if (blockedKeys.has(key)) continue;
-    // Drop schema annotation title/description only when the value is a string annotation,
-    // not when "title" is a property map key (handled by recursion into properties).
-    if ((key === "title" || key === "description") && typeof value === "string") continue;
-    clean[key] = sanitizeSchemaForOpenAI(value);
-  }
-  return clean;
 }
 
 function jsonResponse(body: unknown, status = 200, extraHeaders: HeadersInit = {}) {

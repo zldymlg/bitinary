@@ -10,11 +10,18 @@ const queryLang = (): Lang | null => {
   return l === 'tl' || l === 'en' ? l : null
 }
 
+/** English unless the device's primary language is Tagalog/Filipino. */
+export const deviceLang = (): Lang => {
+  if (typeof navigator === 'undefined') return 'en'
+  const primary = navigator.languages?.[0] || navigator.language || ''
+  return /^(tl|fil)([-_]|$)/i.test(primary) ? 'tl' : 'en'
+}
+
 /** Tagalog/English ito; inuuna ang `?lang=` para sa Screen Index frames. */
 export function LangProvider({ children }: { children: ReactNode }) {
   const [stored, setStored] = usePersistentState<Lang | null>('lang', null)
   const forced = useMemo(queryLang, [])
-  const lang: Lang = forced ?? stored ?? 'tl'
+  const lang: Lang = forced ?? stored ?? deviceLang()
   useEffect(() => {
     document.documentElement.lang = lang === 'tl' ? 'tl' : 'en'
   }, [lang])

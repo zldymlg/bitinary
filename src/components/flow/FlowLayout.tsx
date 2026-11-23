@@ -37,12 +37,13 @@ export function FlowLayout({
           </defs>
           <rect width="100%" height="100%" fill="url(#flow-weave)" />
         </svg>
+        {/* Pinned to the panel center so a taller/shorter caption cannot shift the mascot. */}
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+          <Jimbot expression={pose} variant="standalone" size={320} className="max-h-[46vh] w-auto" />
+        </div>
         <div className="relative flex items-center gap-2.5">
           <Jimbot crop="head" size={44} animate={false} shape="squircle" className="rounded-[12px] ring-2 ring-cream/70" />
           <span className="font-display text-[24px] font-bold text-white">Bitinary</span>
-        </div>
-        <div className="relative flex flex-1 items-center justify-center">
-          <Jimbot expression={pose} variant="standalone" size={320} className="max-h-[46vh] w-auto" />
         </div>
         <div className="relative max-w-[420px]">
           <h2 className="font-display text-[30px] font-bold leading-tight text-white">{asideTitle}</h2>

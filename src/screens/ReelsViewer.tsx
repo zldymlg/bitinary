@@ -19,6 +19,7 @@ import { reelComments, reels, type Reel } from '@/data/reels'
 import { cn } from '@/lib/cn'
 import { getForcedState } from '@/lib/forced'
 import { compact } from '@/lib/format'
+import { isDatabaseBusinessId, persistSavedPlace } from '@/lib/savedPlaces'
 import { useOnline } from '@/lib/useOnline'
 
 const DURATION = 9 // seconds per reel preview
@@ -161,7 +162,7 @@ function ReelSlide({
   const navigate = useNavigate()
   const { t } = useLang()
   const { dataSaver, subtitles, saved, toggleSaved, addStop, showToast } = useStore()
-  const { requireAccount } = useAccount()
+  const { requireAccount, session } = useAccount()
   const [liked, setLiked] = useState(false)
   const [following, setFollowing] = useState(false)
   const [expanded, setExpanded] = useState(false)
@@ -223,10 +224,21 @@ function ReelSlide({
           <Action
             label={isSaved ? 'Naka-save' : 'I-save'}
             aria="I-save"
-            onClick={() => {
+            onClick={async () => {
               if (!isSaved && !requireAccount('Para ma-save ang lugar na ito.')) return
-              toggleSaved(place.id)
-              if (!isSaved) showToast({ text: 'Na-save ang lugar!', expression: 'celebrating' })
+              try {
+                if (isDatabaseBusinessId(place.id)) {
+                  if (session?.kind !== 'user' || !session.accountId) {
+                    showToast({ text: 'Hindi ma-verify ang iyong account. Mag-sign in ulit at subukan muli.' })
+                    return
+                  }
+                  await persistSavedPlace(session.accountId, place.id, !isSaved)
+                }
+                toggleSaved(place.id)
+                if (!isSaved) showToast({ text: 'Na-save ang lugar!', expression: 'celebrating' })
+              } catch (error: unknown) {
+                showToast({ text: error instanceof Error ? error.message : 'Could not update saved places.' })
+              }
             }}
           >
             <Bookmark size={26} fill={isSaved ? 'currentColor' : 'none'} />

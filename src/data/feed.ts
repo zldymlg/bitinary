@@ -23,7 +23,7 @@ const H = 36e5
 const D = 24 * H
 const ago = (ms: number) => new Date(Date.now() - ms).toISOString()
 
-/* Short, believable copy per category. Seeds are deterministic so lists don't reshuffle on reload. */
+/* Short sample/demo copy per category. Seeds are deterministic so lists don't reshuffle on reload. */
 const postCopy: Record<Category, string[]> = {
   Kainan: ['Bagong luto na ulam ngayong tanghali! Dumaan na habang mainit pa.', 'Salamat sa lahat ng kumain dito ngayong weekend. Kita-kits ulit!'],
   Kapihan: ['Bagong batch ng kapeng barako mula Batangas. Amoy pa lang, gising ka na.', 'Tahimik na sulok para sa trabaho o kuwentuhan. May libreng WiFi.'],

@@ -5,7 +5,7 @@ import { useT } from '@/app/i18n'
 import { cn } from '@/lib/cn'
 
 export const inputBase =
-  'h-14 w-full rounded-[16px] border bg-surface px-4 text-[16px] text-fg outline-none transition-colors placeholder:text-fg-2/70 focus:border-primary dark:bg-elevated'
+  'h-14 w-full rounded-[16px] border bg-surface px-4 text-[16px] text-fg transition-colors placeholder:text-fg-2/70 focus:border-primary dark:bg-elevated'
 
 type FieldProps = Omit<InputHTMLAttributes<HTMLInputElement>, 'prefix'> & {
   label: string

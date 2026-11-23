@@ -5,6 +5,7 @@ import {
   ImageOff,
   MapPin,
   MessageCircle,
+  Navigation,
   Phone,
   Send,
   Star,
@@ -24,6 +25,7 @@ import { Skeleton } from "@/components/ui/Skeleton"
 import { resolveBusinessAsset } from "@/biz/db/assets"
 import { loadQuickUpdate } from "@/biz/db/quickUpdates"
 import { activeQuickUpdate, type QuickUpdate } from "@/biz/quickUpdateState"
+import { googleMapsDirectionsUrl } from "@/lib/maps"
 import { supabase } from "@/lib/supabase"
 
 type Business = {
@@ -38,6 +40,10 @@ type Business = {
   address: string
 
   city: string
+
+  latitude: number | null
+
+  longitude: number | null
 
   contact_name: string
 
@@ -268,7 +274,7 @@ export function DatabaseBusinessProfile({ id }: { id: string }) {
             .from("businesses")
 
             .select(
-              "id, name, business_type, price_range, address, city, contact_name, mobile, landline, about, specialties, languages, logo_url, cover_url, links",
+              "id, name, business_type, price_range, address, city, latitude, longitude, contact_name, mobile, landline, about, specialties, languages, logo_url, cover_url, links",
             )
 
             .eq("id", id)
@@ -656,6 +662,14 @@ export function DatabaseBusinessProfile({ id }: { id: string }) {
   const phone = business.mobile || business.landline
 
   const website = safeWebUrl(business.links?.website)
+  const directionsUrl = googleMapsDirectionsUrl(
+    [business.name, business.address, business.city, "Philippines"]
+      .filter(Boolean)
+      .join(", "),
+    business.latitude != null && business.longitude != null
+      ? { lat: business.latitude, lng: business.longitude }
+      : null,
+  )
 
   return (
     <main className="min-h-dvh bg-bg pb-24">
@@ -713,6 +727,16 @@ export function DatabaseBusinessProfile({ id }: { id: string }) {
                   className="inline-flex h-11 items-center gap-2 rounded-full bg-primary px-5 font-display text-sm font-semibold text-ink shadow-md transition hover:brightness-105"
                 >
                   <Phone size={16} /> Tawagan
+                </a>
+              )}
+              {directionsUrl && (
+                <a
+                  href={directionsUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex h-11 items-center gap-2 rounded-full bg-primary px-5 font-display text-sm font-semibold text-ink shadow-md transition hover:brightness-105"
+                >
+                  <Navigation size={16} /> {t("Hanapin ang ruta", "Find route")}
                 </a>
               )}
               {website && (

@@ -392,10 +392,6 @@ export function Composer() {
                           muted
                           autoPlay
                           loop
-                          onLoadedMetadata={(e) => (
-                            setDuration(e.currentTarget.duration),
-                            setTrim([0, Math.min(e.currentTarget.duration, 30)])
-                          )}
                         />
                       ) : (
                         <div className="flex h-full flex-col items-center justify-center gap-2 p-3 text-center text-white/80">
@@ -441,77 +437,6 @@ export function Composer() {
                               }
                             }}
                           />
-                        </label>
-                      </div>
-                      <div>
-                        <p className="mb-1 font-display text-[14px] font-medium">
-                          {t("I-trim", "Trim")}
-                        </p>
-                        <div className="flex items-center gap-3 text-[14px]">
-                          <span className="w-12 font-display">
-                            {trim[0].toFixed(1)}s
-                          </span>
-                          <input
-                            type="range"
-                            aria-label={t("Simula", "Start")}
-                            min={0}
-                            max={duration || 30}
-                            step={0.1}
-                            value={trim[0]}
-                            disabled={!video}
-                            onChange={(e) =>
-                              setTrim([
-                                Math.min(Number(e.target.value), trim[1] - 1),
-                                trim[1],
-                              ])
-                            }
-                            className="flex-1 accent-[var(--c-primary)]"
-                          />
-                        </div>
-                        <div className="flex items-center gap-3 text-[14px]">
-                          <span className="w-12 font-display">
-                            {trim[1].toFixed(1)}s
-                          </span>
-                          <input
-                            type="range"
-                            aria-label={t("Dulo", "End")}
-                            min={0}
-                            max={duration || 30}
-                            step={0.1}
-                            value={trim[1]}
-                            disabled={!video}
-                            onChange={(e) =>
-                              setTrim([
-                                trim[0],
-                                Math.max(Number(e.target.value), trim[0] + 1),
-                              ])
-                            }
-                            className="flex-1 accent-[var(--c-primary)]"
-                          />
-                        </div>
-                      </div>
-                      <div className="flex flex-wrap gap-4">
-                        <label className="flex items-center gap-2 text-[15px]">
-                          <Toggle
-                            label="English captions"
-                            checked={capEn}
-                            onChange={setCapEn}
-                          />{" "}
-                          {t(
-                            "Auto-caption sa English",
-                            "Auto-captions in English",
-                          )}
-                        </label>
-                        <label className="flex items-center gap-2 text-[15px]">
-                          <Toggle
-                            label="Tagalog captions"
-                            checked={capTl}
-                            onChange={setCapTl}
-                          />{" "}
-                          {t(
-                            "Auto-caption sa Tagalog",
-                            "Auto-captions in Tagalog",
-                          )}
                         </label>
                       </div>
                     </div>

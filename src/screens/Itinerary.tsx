@@ -139,13 +139,47 @@ function SavedItineraryDetail({ id }: { id: string }) {
 export function ItineraryView({ id, embedded }: { id: string; embedded?: boolean }) {
   const it = itineraryById(id)
   const stops = useItineraryStops(id)
-  const { setItineraryStops, saveItinerary, savedItineraries, showToast } = useStore()
+  const { setItineraryStops, showToast } = useStore()
   const [editing, setEditing] = useState(false)
   const [editStop, setEditStop] = useState<Stop | null>(null)
   const [share, setShare] = useState(false)
+  const [saved, setSaved] = useState(false)
+  const [saving, setSaving] = useState(false)
   const navigate = useNavigate()
   const open = useOpen()
-  const { requireAccount } = useAccount()
+  const { requireAccount, session } = useAccount()
+
+  useEffect(() => {
+    let active = true
+    const userId = session?.kind === 'user' ? session.accountId : undefined
+    setSaved(false)
+    if (!userId) {
+      return () => {
+        active = false
+      }
+    }
+
+    void (async () => {
+      try {
+        const { data, error } = await supabase
+          .from('itineraries')
+          .select('id')
+          .eq('user_id', userId)
+          .eq('source_key', `template:${id}`)
+          .eq('is_saved', true)
+          .maybeSingle()
+        if (error) throw error
+        if (active) setSaved(Boolean(data))
+      } catch (error: unknown) {
+        console.error('Could not load saved itinerary status:', error)
+        if (active) showToast({ text: 'Hindi ma-check kung naka-save ang itinerary.', expression: 'unsure' })
+      }
+    })()
+
+    return () => {
+      active = false
+    }
+  }, [id, session?.accountId, session?.kind, showToast])
 
   if (!it) {
     return <StateView expression="unsure" title="Walang ganitong itinerary" body="Baka nabura na ito." action="Bumalik" onAction={() => navigate('/')} />
@@ -154,7 +188,6 @@ export function ItineraryView({ id, embedded }: { id: string; embedded?: boolean
   const spent = stopsTotal(stops)
   const remaining = it.budget - spent
   const over = remaining < 0
-  const saved = savedItineraries.includes(id)
 
   const reorder = (next: Stop[]) => {
     // times belong to slots, so the schedule stays chronological
@@ -232,14 +265,43 @@ export function ItineraryView({ id, embedded }: { id: string; embedded?: boolean
           size="lg"
           className="mt-3"
           icon={<Save size={20} />}
+          disabled={saving}
           onClick={() => {
             if (!requireAccount('Para ma-save ang trip mo.')) return
-            saveItinerary(id)
-            setEditing(false)
-            showToast({ text: saved ? 'Na-update ang itinerary!' : 'Na-save! Makikita mo ito kahit offline.', expression: 'celebrating' })
+            if (session?.kind !== 'user' || !session.accountId) return
+
+            setSaving(true)
+            void (async () => {
+              try {
+                const { error } = await supabase.rpc('save_traveler_itinerary', {
+                  p_source_key: `template:${id}`,
+                  p_title: it.title,
+                  p_subtitle: it.subtitle,
+                  p_budget: it.budget,
+                  p_area: it.area,
+                  p_stops: stops.map((stop, sort_order) => ({
+                    stop_time: stop.time,
+                    name: stop.name,
+                    kind: stop.kind,
+                    cost: stop.cost,
+                    note: stop.note ?? null,
+                    sort_order,
+                  })),
+                })
+                if (error) throw error
+                setSaved(true)
+                setEditing(false)
+                showToast({ text: saved ? 'Na-update ang itinerary!' : 'Na-save! Makikita mo ito kahit offline.', expression: 'celebrating' })
+              } catch (error: unknown) {
+              console.error('Could not save itinerary:', error)
+              showToast({ text: 'Hindi na-save ang itinerary. Subukan ulit mamaya.', expression: 'unsure' })
+              } finally {
+                setSaving(false)
+              }
+            })()
           }}
         >
-          {saved ? 'I-save ang pagbabago' : 'I-save ang itinerary'}
+          {saving ? 'Sine-save…' : saved ? 'I-save ang pagbabago' : 'I-save ang itinerary'}
         </Button>
         <p className="mt-3 text-center text-caption text-fg-2">Ang lahat ng gastos ay tantya batay sa huling verified na presyo.</p>
       </div>

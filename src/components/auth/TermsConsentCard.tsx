@@ -175,31 +175,31 @@ const termsSections: TermsSection[] = [
 
 const legalReferences = [
   {
-    label: "RA 10173 — Data Privacy Act of 2012",
+    label: "RA 10173: Data Privacy Act of 2012",
 
     href: "https://lawphil.net/statutes/repacts/ra2012/ra_10173_2012.html",
   },
 
   {
-    label: "RA 11967 — Internet Transactions Act of 2023",
+    label: "RA 11967: Internet Transactions Act of 2023",
 
     href: "https://lawphil.net/statutes/repacts/ra2023/ra_11967_2023.html",
   },
 
   {
-    label: "RA 7394 — Consumer Act of the Philippines",
+    label: "RA 7394: Consumer Act of the Philippines",
 
     href: "https://lawphil.net/statutes/repacts/ra1992/ra_7394_1992.html",
   },
 
   {
-    label: "RA 8792 — Electronic Commerce Act of 2000",
+    label: "RA 8792: Electronic Commerce Act of 2000",
 
     href: "https://lawphil.net/statutes/repacts/ra2000/ra_8792_2000.html",
   },
 
   {
-    label: "RA 8293 — Intellectual Property Code",
+    label: "RA 8293: Intellectual Property Code",
 
     href: "https://lawphil.net/statutes/repacts/ra1997/ra_8293_1997.html",
   },

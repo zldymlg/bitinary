@@ -591,6 +591,7 @@ grant execute on function public.track_business_profile_view(uuid) to authentica
 create table if not exists public.itineraries (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references public.profiles(id) on delete cascade,
+  source_key text,
   title text not null,
   subtitle text,
   budget numeric(12, 2) not null default 0 check (budget >= 0),
@@ -600,6 +601,10 @@ create table if not exists public.itineraries (
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now())
 );
+
+create unique index if not exists itineraries_user_source_key_idx
+  on public.itineraries (user_id, source_key)
+  where source_key is not null;
 
 create table if not exists public.itinerary_stops (
   id uuid primary key default gen_random_uuid(),
@@ -612,6 +617,69 @@ create table if not exists public.itinerary_stops (
   note text,
   sort_order integer not null default 0
 );
+
+create or replace function public.save_traveler_itinerary(
+  p_source_key text,
+  p_title text,
+  p_subtitle text,
+  p_budget numeric,
+  p_area text,
+  p_stops jsonb
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_user_id uuid := auth.uid();
+  v_itinerary_id uuid;
+begin
+  if v_user_id is null then
+    raise exception 'Authentication is required to save an itinerary.';
+  end if;
+
+  if p_source_key is null or p_source_key !~ '^template:[A-Za-z0-9_-]+$' then
+    raise exception 'Invalid itinerary template key.';
+  end if;
+
+  if jsonb_typeof(coalesce(p_stops, '[]'::jsonb)) <> 'array' then
+    raise exception 'Itinerary stops must be an array.';
+  end if;
+
+  insert into public.itineraries (user_id, source_key, title, subtitle, budget, area, is_saved)
+  values (v_user_id, p_source_key, p_title, p_subtitle, p_budget, p_area, true)
+  on conflict (user_id, source_key) where source_key is not null
+  do update set
+    title = excluded.title,
+    subtitle = excluded.subtitle,
+    budget = excluded.budget,
+    area = excluded.area,
+    is_saved = true
+  returning id into v_itinerary_id;
+
+  delete from public.itinerary_stops where itinerary_id = v_itinerary_id;
+
+  insert into public.itinerary_stops (
+    itinerary_id, stop_time, name, kind, cost, note, sort_order
+  )
+  select
+    v_itinerary_id, stop_time, name, kind, cost, note, sort_order
+  from jsonb_to_recordset(coalesce(p_stops, '[]'::jsonb)) as stop_rows(
+    stop_time text,
+    name text,
+    kind text,
+    cost numeric,
+    note text,
+    sort_order integer
+  );
+
+  return v_itinerary_id;
+end;
+$$;
+
+revoke all on function public.save_traveler_itinerary(text, text, text, numeric, text, jsonb) from public, anon;
+grant execute on function public.save_traveler_itinerary(text, text, text, numeric, text, jsonb) to authenticated;
 
 create table if not exists public.moments (
   id uuid primary key default gen_random_uuid(),
@@ -628,8 +696,31 @@ create table if not exists public.moments (
   frame text not null default 'classic',
   tilt numeric(4, 1) not null default 0,
   on_map boolean not null default true,
+  created_at timestamptz not null default timezone('utc', now()),
+  updated_at timestamptz not null default timezone('utc', now())
+);
+
+create table if not exists public.moment_collaborators (
+  moment_id uuid not null references public.moments(id) on delete cascade,
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  added_by uuid not null references public.profiles(id) on delete cascade,
+  created_at timestamptz not null default timezone('utc', now()),
+  primary key (moment_id, user_id),
+  check (user_id <> added_by)
+);
+
+create table if not exists public.moment_photos (
+  id uuid primary key default gen_random_uuid(),
+  moment_id uuid not null references public.moments(id) on delete cascade,
+  author_id uuid not null references public.profiles(id) on delete cascade,
+  storage_path text not null unique,
   created_at timestamptz not null default timezone('utc', now())
 );
+
+create index if not exists moment_collaborators_user_idx
+  on public.moment_collaborators (user_id, moment_id);
+create index if not exists moment_photos_moment_created_idx
+  on public.moment_photos (moment_id, created_at);
 
 create table if not exists public.reservation_requests (
   id uuid primary key default gen_random_uuid(),
@@ -652,6 +743,165 @@ create table if not exists public.notifications (
   read_at timestamptz,
   created_at timestamptz not null default timezone('utc', now())
 );
+
+create or replace function public.can_access_moment(p_moment_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+  select exists (
+    select 1
+    from public.moments m
+    where m.id = p_moment_id
+      and (
+        m.author_id = auth.uid()
+        or exists (
+          select 1
+          from public.moment_collaborators mc
+          where mc.moment_id = m.id and mc.user_id = auth.uid()
+        )
+      )
+  );
+$$;
+
+revoke all on function public.can_access_moment(uuid) from public, anon;
+grant execute on function public.can_access_moment(uuid) to authenticated;
+
+drop function if exists public.search_moment_travelers(text);
+create function public.search_moment_travelers(p_query text)
+returns table (id uuid, name text, nickname text, avatar_url text, email text)
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+  select
+    p.id,
+    p.name,
+    p.nickname,
+    p.avatar_url,
+    case when lower(u.email) = lower(trim(p_query)) then u.email else null end
+  from public.profiles p
+  join auth.users u on u.id = p.id
+  where auth.uid() is not null
+    and p.role = 'traveler'
+    and p.id <> auth.uid()
+    and length(trim(coalesce(p_query, ''))) >= 2
+    and (
+      p.nickname ilike '%' || trim(p_query) || '%'
+      or p.name ilike '%' || trim(p_query) || '%'
+      or lower(u.email) = lower(trim(p_query))
+    )
+  order by coalesce(lower(u.email) = lower(trim(p_query)), false) desc, p.nickname, p.name
+  limit 12;
+$$;
+
+revoke all on function public.search_moment_travelers(text) from public, anon;
+grant execute on function public.search_moment_travelers(text) to authenticated;
+
+create or replace function public.is_moment_traveler(p_user_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+  select exists (
+    select 1 from public.profiles p
+    where p.id = p_user_id and p.role = 'traveler'
+  );
+$$;
+
+revoke all on function public.is_moment_traveler(uuid) from public, anon;
+grant execute on function public.is_moment_traveler(uuid) to authenticated;
+
+create or replace function public.list_moment_collaborators(p_moment_id uuid)
+returns table (id uuid, name text, nickname text, avatar_url text)
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+  select p.id, p.name, p.nickname, p.avatar_url
+  from public.moment_collaborators mc
+  join public.profiles p on p.id = mc.user_id
+  where mc.moment_id = p_moment_id
+    and public.can_access_moment(p_moment_id)
+  order by mc.created_at;
+$$;
+
+revoke all on function public.list_moment_collaborators(uuid) from public, anon;
+grant execute on function public.list_moment_collaborators(uuid) to authenticated;
+
+create or replace function public.notify_moment_collaborator(p_moment_id uuid, p_user_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_author_id uuid;
+  v_caption text;
+begin
+  select m.author_id, m.caption
+  into v_author_id, v_caption
+  from public.moments m
+  where m.id = p_moment_id;
+
+  if v_author_id is null or v_author_id <> auth.uid()
+     or not exists (
+       select 1 from public.moment_collaborators mc
+       where mc.moment_id = p_moment_id and mc.user_id = p_user_id
+     ) then
+    raise exception 'Only the Moment author can notify its collaborators.';
+  end if;
+
+  insert into public.notifications (user_id, kind, title, body, target)
+  values (
+    p_user_id,
+    'moment_tag',
+    'You were tagged in a Moment',
+    coalesce(nullif(v_caption, ''), 'A traveler shared a Moment with you.'),
+    '/moments/map?moment=' || p_moment_id::text
+  );
+end;
+$$;
+
+revoke all on function public.notify_moment_collaborator(uuid, uuid) from public, anon;
+grant execute on function public.notify_moment_collaborator(uuid, uuid) to authenticated;
+
+create or replace function public.guard_moment_collaborator_update()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+  if auth.uid() is not null and old.author_id <> auth.uid() then
+    if not public.can_access_moment(old.id) then
+      raise exception 'You are not a collaborator on this Moment.';
+    end if;
+
+    if new.id is distinct from old.id
+       or new.author_id is distinct from old.author_id
+       or new.storage_path is distinct from old.storage_path
+       or new.created_at is distinct from old.created_at
+       or new.on_map is distinct from old.on_map then
+      raise exception 'Collaborators can edit Moment details but cannot replace or remove the original photo.';
+    end if;
+  end if;
+
+  new.updated_at := timezone('utc', now());
+  return new;
+end;
+$$;
+
+drop trigger if exists moments_guard_collaborator_update on public.moments;
+create trigger moments_guard_collaborator_update
+before update on public.moments
+for each row execute function public.guard_moment_collaborator_update();
 
 create or replace function public.set_dev_console_business_verification(
   p_business_id uuid,
@@ -771,6 +1021,8 @@ alter table public.business_daily_stats enable row level security;
 alter table public.itineraries enable row level security;
 alter table public.itinerary_stops enable row level security;
 alter table public.moments enable row level security;
+alter table public.moment_collaborators enable row level security;
+alter table public.moment_photos enable row level security;
 alter table public.reservation_requests enable row level security;
 alter table public.notifications enable row level security;
 alter table public.jimbot_conversations enable row level security;
@@ -859,6 +1111,15 @@ begin
     ['Users manage itineraries', 'public.itineraries'],
     ['Users manage itinerary stops', 'public.itinerary_stops'],
     ['Users manage moments', 'public.moments'],
+    ['Authors manage moments', 'public.moments'],
+    ['Collaborators view moments', 'public.moments'],
+    ['Collaborators update moment details', 'public.moments'],
+    ['Moment participants view collaborators', 'public.moment_collaborators'],
+    ['Moment authors add collaborators', 'public.moment_collaborators'],
+    ['Moment authors remove collaborators', 'public.moment_collaborators'],
+    ['Moment participants view photos', 'public.moment_photos'],
+    ['Moment participants add photos', 'public.moment_photos'],
+    ['Authors and uploaders delete added photos', 'public.moment_photos'],
     ['Users view notifications', 'public.notifications'],
     ['Users update notifications', 'public.notifications'],
     ['Users manage Jimbot conversations', 'public.jimbot_conversations'],
@@ -903,6 +1164,8 @@ begin
     ['Owners manage reservations', 'public.reservation_requests'],
     ['Users upload their own images', 'storage.objects'],
     ['Users view their own images', 'storage.objects'],
+    ['Users view own and shared Moment images', 'storage.objects'],
+    ['Moment authors delete shared images', 'storage.objects'],
     ['Users update their own images', 'storage.objects'],
     ['Users delete their own images', 'storage.objects'],
     ['Users upload their own videos', 'storage.objects'],
@@ -939,8 +1202,53 @@ for all using (exists (
   select 1 from public.itineraries i
   where i.id = itinerary_id and i.user_id = auth.uid()
 ));
-create policy "Users manage moments" on public.moments
+create policy "Authors manage moments" on public.moments
 for all using (author_id = auth.uid()) with check (author_id = auth.uid());
+create policy "Collaborators view moments" on public.moments
+for select to authenticated using (public.can_access_moment(id));
+create policy "Collaborators update moment details" on public.moments
+for update to authenticated
+using (author_id <> auth.uid() and public.can_access_moment(id))
+with check (author_id <> auth.uid() and public.can_access_moment(id));
+create policy "Moment participants view collaborators" on public.moment_collaborators
+for select to authenticated using (public.can_access_moment(moment_id));
+create policy "Moment authors add collaborators" on public.moment_collaborators
+for insert to authenticated
+with check (
+  added_by = auth.uid()
+  and user_id <> auth.uid()
+  and public.is_moment_traveler(user_id)
+  and exists (
+    select 1 from public.moments m where m.id = moment_id and m.author_id = auth.uid()
+  )
+);
+create policy "Moment authors remove collaborators" on public.moment_collaborators
+for delete to authenticated
+using (
+  exists (
+    select 1 from public.moments m where m.id = moment_id and m.author_id = auth.uid()
+  )
+);
+create policy "Moment participants view photos" on public.moment_photos
+for select to authenticated using (public.can_access_moment(moment_id));
+create policy "Moment participants add photos" on public.moment_photos
+for insert to authenticated
+with check (
+  author_id = auth.uid()
+  and (storage.foldername(storage_path))[1] = auth.uid()::text
+  and public.can_access_moment(moment_id)
+);
+create policy "Authors and uploaders delete added photos" on public.moment_photos
+for delete to authenticated
+using (
+  author_id = auth.uid()
+  or exists (
+    select 1 from public.moments m where m.id = moment_id and m.author_id = auth.uid()
+  )
+);
+grant select, insert, update, delete on public.moments to authenticated;
+grant select, insert, delete on public.moment_collaborators to authenticated;
+grant select, insert, delete on public.moment_photos to authenticated;
 create policy "Users view notifications" on public.notifications
 for select using (user_id = auth.uid());
 create policy "Users update notifications" on public.notifications
@@ -1201,11 +1509,25 @@ with check (
   and (storage.foldername(name))[1] = (select auth.uid()::text)
 );
 
-create policy "Users view their own images"
+create policy "Users view own and shared Moment images"
 on storage.objects for select to authenticated
 using (
   bucket_id = 'images'
-  and (storage.foldername(name))[1] = (select auth.uid()::text)
+  and (
+    (storage.foldername(name))[1] = auth.uid()::text
+    or exists (
+      select 1
+      from public.moments m
+      where m.storage_path = storage.objects.name
+        and public.can_access_moment(m.id)
+    )
+    or exists (
+      select 1
+      from public.moment_photos mp
+      where mp.storage_path = storage.objects.name
+        and public.can_access_moment(mp.moment_id)
+    )
+  )
 );
 
 create policy "Users update their own images"
@@ -1224,6 +1546,23 @@ on storage.objects for delete to authenticated
 using (
   bucket_id = 'images'
   and (storage.foldername(name))[1] = (select auth.uid()::text)
+);
+
+create policy "Moment authors delete shared images"
+on storage.objects for delete to authenticated
+using (
+  bucket_id = 'images'
+  and exists (
+    select 1 from public.moments m
+    where m.author_id = auth.uid()
+      and (
+        m.storage_path = storage.objects.name
+        or exists (
+          select 1 from public.moment_photos mp
+          where mp.moment_id = m.id and mp.storage_path = storage.objects.name
+        )
+      )
+  )
 );
 
 create policy "Users upload their own videos"

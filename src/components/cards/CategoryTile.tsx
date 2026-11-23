@@ -23,7 +23,7 @@ export function CategoryTile({ category, onClick }: { category: Category; onClic
   const labels: Record<Category, [string, string]> = {
     Kainan: ['Kainan', 'Dining'],
     Pasyalan: ['Pasyalan', 'Places'],
-    'Budget Meals': ['Mga murang pagkain', 'Budget meals'],
+    'Budget Meals': ['Tipid', 'Budget'],
     Kapihan: ['Kapihan', 'Cafes'],
     'Street Food': ['Pagkaing kalye', 'Street food'],
     Resorts: ['Mga resort', 'Resorts'],

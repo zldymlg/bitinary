@@ -105,7 +105,7 @@ export function answer(intent: Intent, L: Lang, d: BizData, enough: boolean, fol
       if (!r) return { text: t('Nasagot mo na lahat ng review. Ang galing!', "You've replied to every review. Nice work!") }
       return {
         text: r.stars <= 3
-          ? t(`Heto ang neutral na draft para kay ${r.nick}: “Salamat sa pagbabahagi ng feedback. Pasensya na kung hindi naging maganda ang karanasan mo. Gusto naming mas maintindihan ito—maaari mo ba kaming kontakin nang direkta?”`, `Here’s a neutral draft for ${r.nick}: “Thank you for sharing your feedback. We’re sorry your experience wasn’t a good one. We’d like to understand more—could you contact us directly?”`)
+          ? t(`Heto ang neutral na draft para kay ${r.nick}: “Salamat sa pagbabahagi ng feedback. Pasensya na kung hindi naging maganda ang karanasan mo. Gusto naming mas maintindihan ito, maaari mo ba kaming kontakin nang direkta?”`, `Here’s a neutral draft for ${r.nick}: “Thank you for sharing your feedback. We’re sorry your experience wasn’t a good one. We’d like to understand more, could you contact us directly?”`)
           : t(`Heto ang draft para kay ${r.nick}: “Salamat sa pagbisita at sa pag-iwan ng review. Ikinagagalak naming nagustuhan mo ang karanasan mo. Sana makita ka ulit!”`, `Here’s a draft for ${r.nick}: “Thanks for visiting and leaving a review. We’re glad you enjoyed your experience and hope to see you again!”`),
         actions: [{ kind: 'review', to: `/biz/content/reviews/${r.id}?draft=1` }],
         data: [[t('Review', 'Review'), `${r.stars}★ · ${r.nick}`], [t('Feedback', 'Feedback'), r.text.slice(0, 100)]],

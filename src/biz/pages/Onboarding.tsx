@@ -99,6 +99,8 @@ import { loadOwnedBusiness } from "../db/businesses"
 
 import { saveOwnerProfile } from "../db/ownerProfile"
 
+import { deviceLang } from "@/app/i18n"
+
 import { useBiz, type LangPref } from "../store"
 
 import { BizStatusChip } from "../ui"
@@ -152,9 +154,10 @@ export function BizLanguage() {
 
   const navigate = useNavigate()
 
-  const [pick, setPick] = useState<LangPref>(d.langPref ?? "en")
+  const detected = deviceLang()
+  const [pick, setPick] = useState<LangPref>(d.langPref ?? detected)
 
-  const en = pick !== "tl"
+  const en = (pick === "device" ? detected : pick) === "en"
 
   return (
     <main className="relative flex min-h-dvh flex-col bg-primary md:flex-row">
@@ -170,14 +173,14 @@ export function BizLanguage() {
           className="max-h-[32vh] w-auto md:max-h-[50vh]"
         />
         <p className="mt-2 rounded-full bg-ink/85 px-4 py-1.5 font-display text-[14px] font-semibold text-cream">
-          Hello! · Kumusta!
+          {en ? "Hello!" : "Kumusta!"}
         </p>
       </div>
       <section className="relative rounded-t-[32px] bg-surface px-6 pb-[max(20px,env(safe-area-inset-bottom))] pt-6 text-fg md:my-auto md:mr-10 md:w-[440px] md:rounded-[32px] md:shadow-float xl:mr-24">
         <div className="flex items-center gap-2 text-link">
           <Globe size={20} />{" "}
           <span className="font-display text-[14px] font-semibold">
-            Language · Wika
+            {en ? "Language" : "Wika"}
           </span>
         </div>
         <h1 className="mt-1 text-title">

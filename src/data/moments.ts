@@ -1,4 +1,10 @@
 export type MomentFrame = 'classic' | 'cream' | 'orange' | 'brown' | 'film'
+export type MomentPhoto = {
+  id: string
+  src: string
+  authorId: string
+  storagePath: string
+}
 export type Moment = {
   id: string
   src: string
@@ -13,6 +19,9 @@ export type Moment = {
   frame: MomentFrame
   tilt: number
   onMap: boolean
+  authorId?: string | null
+  collaborator?: boolean
+  photos?: MomentPhoto[]
 }
 
 const u = (id: string) => `https://images.unsplash.com/${id}?auto=format&fit=crop&w=600&h=600&q=70`

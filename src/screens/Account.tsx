@@ -1,4 +1,4 @@
-import { Store, Bell, Bookmark, ChevronRight, Database, Globe, HelpCircle, Lock, LogOut, Map, Palette, Captions, User, Wallet, Sparkles, ShieldCheck } from 'lucide-react'
+import { Store, Bell, Bookmark, ChevronRight, Database, Download, Globe, HelpCircle, Lock, LogOut, Map as MapIcon, Palette, Captions, Share, SquarePlus, User, Wallet, Sparkles, ShieldCheck, X } from 'lucide-react'
 import { useEffect, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router'
 import { useAccount } from '@/app/account'
@@ -6,8 +6,6 @@ import { useStore } from '@/app/store'
 import { useTheme, type ThemeMode } from '@/app/theme'
 import { useLang } from '@/app/i18n'
 import { cn } from '@/lib/cn'
-import { ItineraryCard } from '@/components/cards/ItineraryCard'
-import { ListingCard } from '@/components/cards/ListingCard'
 import { LargeTitle } from '@/components/layout/TopBar'
 import { Jimbot } from '@/components/mascot/Jimbot'
 import { Button } from '@/components/ui/Button'
@@ -16,22 +14,29 @@ import { Segmented } from '@/components/ui/Segmented'
 import { PasswordField } from '@/components/flow/Fields'
 import { Sheet } from '@/components/ui/Sheet'
 import { Toggle } from '@/components/ui/Toggle'
-import { itineraries } from '@/data/itineraries'
-import { places } from '@/data/places'
 import { peso } from '@/lib/format'
 import { usePersistentState } from '@/lib/usePersistentState'
 import { isGoogleOnlyAccount } from '@/lib/authFlow'
+import { useInstallPrompt } from '@/lib/useInstallPrompt'
 import { supabase } from '@/lib/supabase'
 
-type SheetKey = 'profile' | 'security' | 'saved' | 'trips' | 'budget' | 'notif' | 'privacy' | 'help' | 'lang' | null
+type SheetKey = 'profile' | 'security' | 'saved' | 'trips' | 'budget' | 'billing' | 'notif' | 'privacy' | 'help' | 'lang' | null
+type SavedBusiness = { id: string; name: string; business_type: string | null; address: string; city: string }
+type SavedTrip = { id: string; title: string; subtitle: string | null; area: string | null; budget: number }
 
 export function Account() {
   const { mode, setMode } = useTheme()
-  const { saved, savedItineraries, dataSaver, setDataSaver, subtitles, setSubtitles, showToast } = useStore()
+  const { saved, removeSaved, dataSaver, setDataSaver, subtitles, setSubtitles, showToast } = useStore()
   const { profile, prefs, session, signOut, updatePassword } = useAccount()
   const { lang, setLang, t } = useLang()
+  const install = useInstallPrompt()
   const guest = session?.kind !== 'user'
   const [sheet, setSheet] = useState<SheetKey>(null)
+  const [installHelp, setInstallHelp] = useState(false)
+  const [savedBusinesses, setSavedBusinesses] = useState<SavedBusiness[]>([])
+  const [savedTrips, setSavedTrips] = useState<SavedTrip[]>([])
+  const [accountDataLoading, setAccountDataLoading] = useState(true)
+  const [accountDataError, setAccountDataError] = useState<string | null>(null)
   const [notif, setNotif] = usePersistentState('notifPrefs', { deals: true, trips: true, reels: false })
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
@@ -41,6 +46,95 @@ export function Account() {
   const [passwordError, setPasswordError] = useState<string | null>(null)
   const [securityMessage, setSecurityMessage] = useState<string | null>(null)
   const navigate = useNavigate()
+
+  const removeSavedBusiness = async (businessId: string) => {
+    if (session?.kind !== 'user' || !session.accountId) return
+    const { error } = await supabase
+      .from('saved_places')
+      .delete()
+      .eq('user_id', session.accountId)
+      .eq('business_id', businessId)
+    if (error) {
+      console.error('Could not remove saved business:', error)
+      showToast({ text: 'Hindi maalis ang negosyo sa naka-save. Subukan ulit mamaya.', expression: 'unsure' })
+      return
+    }
+    removeSaved(businessId)
+    setSavedBusinesses((businesses) => businesses.filter((business) => business.id !== businessId))
+  }
+
+  useEffect(() => {
+    let active = true
+    const userId = session?.kind === 'user' ? session.accountId : undefined
+    setAccountDataLoading(true)
+    setAccountDataError(null)
+    setSavedBusinesses([])
+    setSavedTrips([])
+
+    if (guest || !userId) {
+      setAccountDataLoading(false)
+      return () => {
+        active = false
+      }
+    }
+
+    void (async () => {
+      const [savedResult, tripsResult] = await Promise.all([
+        supabase
+          .from('saved_places')
+          .select('business_id')
+          .eq('user_id', userId),
+        supabase
+          .from('itineraries')
+          .select('id, title, subtitle, area, budget')
+          .eq('user_id', userId)
+          .eq('is_saved', true)
+          .order('updated_at', { ascending: false }),
+      ])
+      if (savedResult.error) throw new Error(savedResult.error.message)
+      if (tripsResult.error) throw new Error(tripsResult.error.message)
+
+      const savedIds = (savedResult.data ?? []).map((row) => row.business_id)
+      const businessesResult = savedIds.length
+        ? await supabase
+            .from('businesses')
+            .select('id, name, business_type, address, city')
+            .in('id', savedIds)
+        : { data: [], error: null }
+      if (businessesResult.error) throw new Error(businessesResult.error.message)
+      if (!active) return
+
+      const businessesById = new Map(
+        (businessesResult.data ?? []).map((business) => [business.id, business]),
+      )
+      setSavedBusinesses(
+        savedIds.map((id) => businessesById.get(id) ?? {
+          id,
+          name: 'Business unavailable',
+          business_type: null,
+          address: '',
+          city: '',
+        }),
+      )
+      setSavedTrips(
+        (tripsResult.data ?? []).map((trip) => ({
+          ...trip,
+          budget: Number(trip.budget),
+        })),
+      )
+    })()
+      .catch((error: unknown) => {
+        if (!active) return
+        setAccountDataError(error instanceof Error ? error.message : 'Could not load your account data.')
+      })
+      .finally(() => {
+        if (active) setAccountDataLoading(false)
+      })
+
+    return () => {
+      active = false
+    }
+  }, [guest, saved, session?.accountId, session?.kind])
 
   useEffect(() => {
     if (sheet !== 'security' || guest) return
@@ -71,6 +165,11 @@ export function Account() {
     setSecurityMessage(null)
   }
 
+  const requestInstall = async () => {
+    if (install.canPrompt && await install.install()) return
+    setInstallHelp(true)
+  }
+
   return (
     <main className="mx-auto max-w-[760px] pb-32 md:px-6 md:pb-12">
       <LargeTitle title={<span className="flex items-center gap-2">{t('Aking pahina', 'Account')} <PhaseTag phase="MVP" /></span>} />
@@ -90,11 +189,12 @@ export function Account() {
           <p className="font-display text-[22px] font-bold leading-tight text-white">{guest ? t('Panauhin', 'Guest') : profile.name || t('Biyahero', 'Traveler')}</p>
           <p className="text-[14px] font-semibold text-ink">{guest ? t('Nagtutuklas muna', 'Exploring for now') : `${session?.role === 'business' ? t('Negosyo', 'Business') : t('Biyahero', 'Traveler')}${profile.city ? ` · ${profile.city}` : ''}`}</p>
           <div className="mt-2 flex gap-3 font-display text-[13px] font-semibold text-ink">
-            <span>{saved.length} {t('naka-save', 'saved')}</span>
-            <span>{Math.max(savedItineraries.length, 1)} {t('biyahe', 'trips')}</span>
+            <span>{accountDataLoading ? '…' : savedBusinesses.length} {t('naka-save', 'saved')}</span>
+            <span>{accountDataLoading ? '…' : savedTrips.length} {t('biyahe', 'trips')}</span>
           </div>
         </div>
       </section>
+      {accountDataError && <p role="alert" className="mx-4 mt-3 rounded-xl bg-danger-bg p-3 text-caption text-danger md:mx-0">{accountDataError}</p>}
 
       {guest && (
         <div className="mx-4 mt-4 flex items-center gap-3 rounded-[20px] bg-surface p-4 shadow-card md:mx-0">
@@ -109,13 +209,23 @@ export function Account() {
         <Item icon={<User size={19} />} color="#FF6A00" label={t('Tungkol sa akin', 'Profile')} onClick={() => navigate('/personalize/about?from=prefs')} />
         <Item icon={<Sparkles size={19} />} color="#6B3A22" label={lang === 'en' ? 'My Preferences' : 'Mga Preference ko'} sub={lang === 'en' ? 'Travel history, budget, food, privacy' : 'Huling biyahe, budget, pagkain, privacy'} onClick={() => navigate('/account/preferences')} />
         {session?.role === 'business' && <Item icon={<Store size={19} />} color="#FF6A00" label={lang === 'en' ? 'Business dashboard' : 'Dashboard ng negosyo'} onClick={() => navigate('/biz')} />}
-        <Item icon={<Bookmark size={19} />} color="#D32F2F" label={t('Naka-save', 'Saved')} value={String(saved.length)} onClick={() => setSheet('saved')} />
-        <Item icon={<Map size={19} />} color="#1B8A3A" label={t('Mga biyahe', 'Trips')} value={String(itineraries.length)} onClick={() => setSheet('trips')} />
+        <Item icon={<Bookmark size={19} />} color="#D32F2F" label={t('Naka-save', 'Saved')} value={accountDataLoading ? '…' : String(savedBusinesses.length)} onClick={() => setSheet('saved')} />
+        <Item icon={<MapIcon size={19} />} color="#1B8A3A" label={t('Mga biyahe', 'Trips')} value={accountDataLoading ? '…' : String(savedTrips.length)} onClick={() => setSheet('trips')} />
         <Item icon={<Wallet size={19} />} color="#FFB400" iconFg="#2B130A" label={t('Kagustuhan sa badyet', 'Budget preferences')} value={`${peso(prefs.dailyBudget)}/${t('araw', 'day')}`} onClick={() => navigate('/personalize/budget?from=prefs')} />
+        <Item icon={<Wallet size={19} />} color="#6B3A22" iconFg="#FFF" label={t('Plan at bayad', 'Plan and billing')} value={t('Libre', 'Free')} onClick={() => setSheet('billing')} />
       </Group>
 
       <Group title={t('Aplikasyon', 'App')}>
         <Item icon={<Globe size={19} />} color="#0B7F96" label={lang === 'en' ? 'Language' : 'Wika'} value={lang === 'en' ? 'English' : 'Tagalog'} onClick={() => setSheet('lang')} />
+        {!install.isStandalone && (
+          <Item
+            icon={<Download size={19} />}
+            color="#0B7F96"
+            label={t('I-install ang Bitinary', 'Install Bitinary')}
+            sub={t('Idagdag ang app sa iyong home screen', 'Add the app to your home screen')}
+            onClick={() => void requestInstall()}
+          />
+        )}
         <li className="flex flex-col gap-2.5 px-4 py-3">
           <div className="flex items-center gap-3">
             <IconTile color="#6B3A22">
@@ -160,16 +270,76 @@ export function Account() {
 
       <Sheet open={sheet === 'saved'} onClose={() => setSheet(null)} title={t('Naka-save', 'Saved')}>
         <div className="space-y-2.5">
-          {places.filter((p) => saved.includes(p.id)).map((p) => (
-            <ListingCard key={p.id} place={p} layout="row" />
+          {savedBusinesses.map((business) => (
+            <div key={business.id} className="flex items-center gap-2 rounded-[18px] bg-surface p-3 shadow-card">
+              <button onClick={() => { setSheet(null); navigate(`/shop/${business.id}`) }} className="flex min-w-0 flex-1 items-center gap-3 text-left">
+                <IconTile color="#D32F2F"><Store size={19} /></IconTile>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate font-display font-semibold">{business.name}</span>
+                  <span className="block truncate text-caption text-fg-2">{[business.business_type, business.address, business.city].filter(Boolean).join(' · ')}</span>
+                </span>
+                <ChevronRight size={18} className="text-muted" />
+              </button>
+              <button type="button" aria-label={t('Alisin sa naka-save', 'Remove saved business')} onClick={() => void removeSavedBusiness(business.id)} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-fg-2 hover:bg-sunken">
+                <X size={18} />
+              </button>
+            </div>
           ))}
-          {!saved.length && <p className="py-6 text-center text-body text-fg-2">{t('Wala pang naka-save.', 'Nothing saved yet.')}</p>}
+          {!accountDataLoading && !savedBusinesses.length && <p className="py-6 text-center text-body text-fg-2">{t('Wala pang naka-save na negosyo sa database.', 'No saved businesses yet.')}</p>}
+          {accountDataLoading && <p className="py-6 text-center text-body text-fg-2">{t('Kinukuha ang mga naka-save…', 'Loading saved businesses…')}</p>}
         </div>
       </Sheet>
       <Sheet open={sheet === 'trips'} onClose={() => setSheet(null)} title={t('Mga biyahe', 'Trips')}>
         <div className="space-y-3">
-          {itineraries.map((it) => (
-            <ItineraryCard key={it.id} it={it} className="w-full" />
+          {savedTrips.map((trip) => (
+            <button key={trip.id} onClick={() => { setSheet(null); navigate(`/itinerary/${trip.id}`) }} className="flex w-full items-center gap-3 rounded-[18px] bg-surface p-3 text-left shadow-card">
+              <IconTile color="#1B8A3A"><MapIcon size={19} /></IconTile>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate font-display font-semibold">{trip.title}</span>
+                <span className="block truncate text-caption text-fg-2">{[trip.area, trip.subtitle].filter(Boolean).join(' · ')}</span>
+              </span>
+              <span className="shrink-0 text-sm font-semibold">{peso(trip.budget)}</span>
+            </button>
+          ))}
+          {!accountDataLoading && !savedTrips.length && <p className="py-6 text-center text-body text-fg-2">{t('Wala pang naka-save na biyahe.', 'No saved trips yet.')}</p>}
+          {accountDataLoading && <p className="py-6 text-center text-body text-fg-2">{t('Kinukuha ang mga biyahe…', 'Loading trips…')}</p>}
+        </div>
+      </Sheet>
+      <Sheet open={sheet === 'billing'} onClose={() => setSheet(null)} title={t('Plan at bayad', 'Plan and billing')}>
+        <div className="grid gap-3">
+          {([
+            [
+              'Free',
+              '₱0',
+              [
+                t('Verified business search at profiles', 'Verified business search and profiles'),
+                t('Saved businesses at hanggang 3 saved trips', 'Saved businesses and up to 3 saved trips'),
+                t('Basic Jimbot at private Moments', 'Basic Jimbot and private Moments'),
+                t('Likes, comments, reviews at PWA', 'Likes, comments, reviews and PWA'),
+              ],
+            ],
+            [
+              'Traveler Premium',
+              '₱149 / month',
+              [
+                t('Unlimited na saved trips', 'Unlimited saved trips'),
+                t('Mas mahabang Jimbot history', 'Extended Jimbot conversation history'),
+                t('Moments collaborators, extra photos at storage', 'Moments collaborators, extra photos and storage'),
+              ],
+            ],
+          ] as const).map(([name, price, features]) => (
+            <div key={name} className="rounded-[20px] bg-surface p-4 shadow-card">
+              <p className="font-display text-[20px] font-bold">{name}</p>
+              <p className="mt-1 font-display text-[28px] font-bold">{price}</p>
+              {name === 'Traveler Premium' && (
+                <p className="mt-1 text-[13px] font-semibold text-link">
+                  ₱1,490 / year · {t('10 buwan para sa 12', '10 months for 12')}
+                </p>
+              )}
+              <ul className="mt-3 list-disc space-y-1 pl-5 text-[15px] text-fg-2">
+                {features.map((feature) => <li key={feature}>{feature}</li>)}
+              </ul>
+            </div>
           ))}
         </div>
       </Sheet>
@@ -182,6 +352,39 @@ export function Account() {
             </button>
           ))}
         </div>
+      </Sheet>
+      <Sheet open={installHelp} onClose={() => setInstallHelp(false)} title={t('Idagdag sa Home Screen', 'Install Bitinary')}>
+        <ol className="space-y-3 text-body">
+          {install.isIOS ? (
+            <>
+              <li className="flex items-center gap-3">
+                <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-sunken"><Share size={20} /></span>
+                {t('I-tap ang Share sa ibaba ng Safari.', 'In Safari, tap Share at the bottom of the screen.')}
+              </li>
+              <li className="flex items-center gap-3">
+                <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-sunken"><SquarePlus size={20} /></span>
+                {t('Piliin ang Add to Home Screen.', 'Choose Add to Home Screen.')}
+              </li>
+            </>
+          ) : (
+            <>
+              <li className="flex items-center gap-3">
+                <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-sunken font-display font-bold">⋮</span>
+                {t('Buksan ang menu ng browser.', 'Open your browser menu.')}
+              </li>
+              <li className="flex items-center gap-3">
+                <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-sunken"><Download size={20} /></span>
+                {t('Piliin ang Install app o Add to Home screen.', 'Choose Install app or Add to Home screen.')}
+              </li>
+            </>
+          )}
+        </ol>
+        <p className="mt-4 text-caption text-fg-2">
+          {t('Kung walang opsyong i-install, buksan ang Bitinary sa Safari o Chrome.', 'If you do not see an install option, open Bitinary in Safari or Chrome.')}
+        </p>
+        <Button block className="mt-5" onClick={() => setInstallHelp(false)}>
+          {t('Sige', 'Got it')}
+        </Button>
       </Sheet>
       <Sheet open={sheet === 'notif'} onClose={() => setSheet(null)} title={t('Mga abiso', 'Notifications')}>
         <ul className="divide-y divide-line">
