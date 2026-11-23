@@ -1,7 +1,7 @@
 /**
  * Embed live verified businesses for Jimbot hybrid search.
  * Usage: node scripts/embed-businesses.mjs
- * Reads OPENAI_API_KEY from supabase/functions/.env (or process env).
+ * Reads EMBEDDING_API_KEY from .env.local or supabase/functions/.env (or process env).
  */
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -12,15 +12,17 @@ import { fileURLToPath } from "node:url";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 function loadEnv() {
-  const envPath = path.join(root, "supabase/functions/.env");
-  if (!fs.existsSync(envPath)) return;
-  for (const line of fs.readFileSync(envPath, "utf8").split(/\r?\n/)) {
-    if (!line || line.startsWith("#")) continue;
-    const i = line.indexOf("=");
-    if (i < 0) continue;
-    const k = line.slice(0, i).trim();
-    const v = line.slice(i + 1).trim();
-    if (!process.env[k]) process.env[k] = v;
+  // Function-specific file wins over the shared repo-root .env.local.
+  for (const envPath of [path.join(root, "supabase/functions/.env"), path.join(root, ".env.local")]) {
+    if (!fs.existsSync(envPath)) continue;
+    for (const line of fs.readFileSync(envPath, "utf8").split(/\r?\n/)) {
+      if (!line || line.startsWith("#")) continue;
+      const i = line.indexOf("=");
+      if (i < 0) continue;
+      const k = line.slice(0, i).trim();
+      const v = line.slice(i + 1).trim();
+      if (!process.env[k]) process.env[k] = v;
+    }
   }
 }
 
@@ -30,11 +32,14 @@ const SUPABASE_URL = process.env.SUPABASE_URL || "http://127.0.0.1:54321";
 const SERVICE_KEY =
   process.env.SUPABASE_SERVICE_ROLE_KEY ||
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU";
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const EMBED_MODEL = process.env.OPENAI_EMBEDDING_MODEL || "text-embedding-3-small";
+const EMBEDDING_API_KEY = process.env.EMBEDDING_API_KEY;
+const EMBEDDING_BASE_URL = (process.env.EMBEDDING_BASE_URL || "https://openrouter.ai/api/v1").replace(/\/$/, "");
+const EMBED_MODEL = process.env.EMBEDDING_MODEL || "nvidia/nemotron-3.5-embed-1b:free";
+// business_embeddings.embedding is vector(1536); Nemotron returns 2048 dims.
+const EMBEDDING_DIMENSIONS = 1536;
 
-if (!OPENAI_API_KEY) {
-  console.error("OPENAI_API_KEY missing");
+if (!EMBEDDING_API_KEY) {
+  console.error("EMBEDDING_API_KEY missing");
   process.exit(1);
 }
 
@@ -55,21 +60,38 @@ function contentFor(row) {
 }
 
 function hash(text) {
-  return crypto.createHash("sha256").update(text).digest("hex");
+  // Key the cache by provider + model so switching models forces a full re-embed.
+  return crypto.createHash("sha256").update(`${EMBEDDING_BASE_URL}|${EMBED_MODEL}\n${text}`).digest("hex");
+}
+
+function fitEmbedding(embedding) {
+  if (!Array.isArray(embedding) || embedding.length < EMBEDDING_DIMENSIONS) return null;
+  const vector = embedding.slice(0, EMBEDDING_DIMENSIONS);
+  const norm = Math.sqrt(vector.reduce((sum, n) => sum + n * n, 0));
+  if (!Number.isFinite(norm) || norm === 0) return null;
+  return vector.map((n) => n / norm);
 }
 
 async function embed(text) {
-  const res = await fetch("https://api.openai.com/v1/embeddings", {
+  const res = await fetch(`${EMBEDDING_BASE_URL}/embeddings`, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${OPENAI_API_KEY}`,
+      Authorization: `Bearer ${EMBEDDING_API_KEY}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({ model: EMBED_MODEL, input: text }),
   });
   const json = await res.json();
   if (!res.ok) throw new Error(JSON.stringify(json));
-  return json.data[0].embedding;
+  const raw = json?.data?.[0]?.embedding;
+  const fitted = fitEmbedding(raw);
+  if (!fitted) {
+    throw new Error(
+      `Embedding from ${EMBED_MODEL} has ${Array.isArray(raw) ? raw.length : "unknown"} dimensions; ` +
+        `expected at least ${EMBEDDING_DIMENSIONS}. Check EMBEDDING_MODEL and the vector column size.`,
+    );
+  }
+  return fitted;
 }
 
 const { data: businesses, error } = await supabase

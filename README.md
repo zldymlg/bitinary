@@ -91,6 +91,10 @@ VITE_TURNSTILE_SITE_KEY=your-turnstile-site-key
 
 These are browser-visible settings, not secrets. Supabase RLS is the security boundary. Do not commit credentials or use a Supabase service-role key in the frontend.
 
+Jimbot's server-only gateway settings live in the same `.env.local`. The file already has `OPENCODE_API_KEY=` for you to fill in, along with `OPENCODE_MODEL` and `OPENCODE_BASE_URL`. Vite only exposes `VITE_` vars to the browser, so the OpenCode key never reaches the client bundle. See `supabase/functions/jimbot/README.md` for the full list.
+
+Hybrid vector search is optional. To enable it, put an OpenRouter key in `EMBEDDING_API_KEY` in `.env.local`, then run `pnpm embed:businesses` once. It defaults to `nvidia/nemotron-3.5-embed-1b:free`; the model's 2048-dimension output is truncated to 1536 to match the existing `business_embeddings` column, so no database migration is required. Without a key, Jimbot falls back to `ilike` text search.
+
 Run the app and checks:
 
 ```sh

@@ -28,6 +28,9 @@ export type JimbotAiResult = {
 
 const FALLBACK_TEXT = 'Hindi ako makasagot ngayon. Subukan ulit mamaya.'
 
+/** Local dev only: point at a `deno run` / `supabase functions serve` instance. */
+const JIMBOT_FUNCTION_URL = import.meta.env.VITE_JIMBOT_FUNCTION_URL as string | undefined
+
 const arr = <T,>(v: unknown): T[] | undefined => (Array.isArray(v) && v.length ? (v as T[]) : undefined)
 
 type BizRow = {
@@ -147,21 +150,38 @@ async function hydrateBot(bot: JimbotBotFields): Promise<JimbotBotFields> {
 export async function askJimbot(req: JimbotAiRequest): Promise<JimbotAiResult> {
   const fail: JimbotAiResult = { ok: false, bot: { text: FALLBACK_TEXT }, payload: null }
   try {
-    const { data, error } = await supabase.functions.invoke('jimbot', {
-      body: {
-        message: req.message,
-        conversationId: req.conversationId ?? null,
-        planningContext: req.planningContext ?? null,
-        explicitConfirmed: req.explicitConfirmed ?? false,
-        history: req.history ?? [],
-      },
-    })
-    if (error || !data || typeof data !== 'object') {
+    const body = {
+      message: req.message,
+      conversationId: req.conversationId ?? null,
+      planningContext: req.planningContext ?? null,
+      explicitConfirmed: req.explicitConfirmed ?? false,
+      history: req.history ?? [],
+    }
+
+    let data: unknown
+    if (JIMBOT_FUNCTION_URL) {
+      const { data: auth } = await supabase.auth.getSession()
+      const res = await fetch(JIMBOT_FUNCTION_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(auth.session?.access_token ? { Authorization: `Bearer ${auth.session.access_token}` } : {}),
+        },
+        body: JSON.stringify(body),
+      })
+      if (!res.ok) return fail
+      data = await res.json()
+    } else {
+      const result = await supabase.functions.invoke('jimbot', { body })
+      if (result.error) return fail
+      data = result.data
+    }
+    if (!data || typeof data !== 'object') {
       return fail
     }
     const d = data as Record<string, any>
     const text = String(d.message ?? d.text ?? '').trim()
-    // Edge function returns its own generic fallback (with a warning) when OpenAI fails.
+    // Edge function returns its own generic fallback (with a warning) when the model call fails.
     const warnings = arr<string>(d.warnings)
     const tempIssue = !!warnings?.some((w) => w.startsWith('Temporary issue'))
     if (!text || tempIssue) return fail
