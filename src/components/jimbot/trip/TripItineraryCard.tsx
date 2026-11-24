@@ -5,6 +5,7 @@ import { toTripView, type TripStop } from '@/lib/jimbotTrip'
 import { cn } from '@/lib/cn'
 import { Sheet } from '@/components/ui/Sheet'
 import { TripMap } from '@/components/jimbot/trip/TripMap'
+import { resolveBusinessImage } from '@/biz/db/assets'
 
 const peso = (n: number) => `₱${n.toLocaleString()}`
 
@@ -21,6 +22,26 @@ function categoryIcon(category: string | null): ReactNode {
   if (/kainan|food|resto|ramen|meal/.test(c)) return <Utensils size={18} />
   if (/pasyalan|park|museum|trail|landmark/.test(c)) return <Landmark size={18} />
   return <MapPin size={18} />
+}
+
+function TripPhoto({ source, className, fallback }: {
+  source?: string | null
+  className: string
+  fallback: ReactNode
+}) {
+  const [resolved, setResolved] = useState<{ source: string; url: string }>()
+  useEffect(() => {
+    if (!source) return
+    let active = true
+    void resolveBusinessImage(source).then((url) => {
+      if (active) setResolved({ source, url })
+    }).catch(() => {
+      if (active) setResolved(undefined)
+    })
+    return () => { active = false }
+  }, [source])
+  if (!resolved || resolved.source !== source) return fallback
+  return <img src={resolved.url} alt="" className={className} onError={() => setResolved(undefined)} />
 }
 
 function directionsUrl(stop: TripStop) {
@@ -93,11 +114,8 @@ export function TripItineraryCard({
   return (
     <article className="overflow-hidden rounded-[22px] bg-[#2b1e18] text-[#f5f0eb] shadow-sm">
       <div className="relative h-36">
-        {hero ? (
-          <img src={hero} alt="" className="h-full w-full object-cover" />
-        ) : (
-          <div className="h-full w-full bg-gradient-to-br from-[#6b3a22] to-[#2b1e18]" />
-        )}
+        <TripPhoto source={hero} className="h-full w-full object-cover"
+          fallback={<div className="h-full w-full bg-gradient-to-br from-[#6b3a22] to-[#2b1e18]" />} />
         <div className="absolute inset-0 bg-gradient-to-t from-[#2b1e18] to-transparent" />
         <div className="absolute bottom-3 left-4 right-4">
           <p className="mb-1 inline-flex rounded-full bg-black/35 px-2 py-0.5 text-[11px] text-[#f5f0eb]">Verified spots</p>
@@ -172,11 +190,7 @@ export function TripItineraryCard({
                   >
                     <span className="w-11 shrink-0 text-[13px] text-[#c6b5a9]">{s.time ?? '—'}</span>
                     <span className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-[10px] bg-[#2b1e18] text-[#f09a50]">
-                      {s.photo ? (
-                        <img src={s.photo} alt="" className="h-full w-full object-cover" />
-                      ) : (
-                        categoryIcon(s.category)
-                      )}
+                      <TripPhoto source={s.photo} className="h-full w-full object-cover" fallback={categoryIcon(s.category)} />
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-[16px] font-medium">{s.name}</span>
@@ -258,11 +272,8 @@ export function TripItineraryCard({
       <Sheet open={!!open} onClose={() => setOpen(null)} title={open?.name ?? 'Stop'}>
         {open && (
           <div className="space-y-3 text-sm">
-            {open.photo ? (
-              <img src={open.photo} alt="" className="h-36 w-full rounded-xl object-cover" />
-            ) : (
-              <div className="flex h-24 items-center justify-center rounded-xl bg-sunken text-[#f09a50]">{categoryIcon(open.category)}</div>
-            )}
+            <TripPhoto source={open.photo} className="h-36 w-full rounded-xl object-cover"
+              fallback={<div className="flex h-24 items-center justify-center rounded-xl bg-sunken text-[#f09a50]">{categoryIcon(open.category)}</div>} />
             <p className="text-fg-2">{open.area}</p>
             <p>
               {open.time ?? 'Time not set'} · {open.category}

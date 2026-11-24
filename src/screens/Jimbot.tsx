@@ -44,8 +44,15 @@ export function JimbotScreen() {
 }
 
 export function JimbotChat({ embedded }: { embedded?: boolean }) {
-  const { t } = useLang()
+  const { t, lang } = useLang()
   const [messages, setMessages] = useState<Msg[]>([])
+  const pendingReplyTiming = useRef<{ id: string; start: number; traceId?: string } | null>(null)
+  useEffect(() => {
+    const timing = pendingReplyTiming.current
+    if (!timing || !messages.some((message) => message.id === timing.id)) return
+    pendingReplyTiming.current = null
+    performance.measure('jimbot:reply-render', { start: timing.start, detail: { traceId: timing.traceId } })
+  }, [messages])
   const [thinking, setThinking] = useState(false)
   const [input, setInput] = useState('')
   const [budgetOpen, setBudgetOpen] = useState(false)
@@ -228,6 +235,7 @@ export function JimbotChat({ embedded }: { embedded?: boolean }) {
   const send = async (text: string, opts: { explicitConfirmed?: boolean; retry?: boolean } = {}) => {
     const clean = text.trim().slice(0, MAX_INPUT)
     if (!clean || thinking || historyLoading || historyError || switchingConversation) return
+    const started = performance.now()
 
     const userMsg: Msg = { id: `u${Date.now()}`, role: 'user', text: clean }
     // The current turn is sent separately as body.message.
@@ -241,11 +249,21 @@ export function JimbotChat({ embedded }: { embedded?: boolean }) {
     setInput('')
     setThinking(true)
 
-    const pushOffline = (replyText: string) =>
-      setMessages((m) => [...m, { id: `b${Date.now()}`, role: 'bot', expression: 'unsure', text: replyText, retryText: clean }])
+    const pushOffline = (replyText: string, traceId?: string) => {
+      const id = `b${crypto.randomUUID()}`
+      pendingReplyTiming.current = { id, start: started, traceId }
+      setMessages((m) => [...m, { id, role: 'bot', expression: 'unsure', text: replyText, retryText: clean }])
+    }
 
     try {
-      if (!opts.retry) await saveMessage('user', clean, 'user')
+      if (!opts.retry) {
+        const saveStarted = performance.now()
+        try {
+          await saveMessage('user', clean, 'user')
+        } finally {
+          performance.measure('jimbot:user-save', { start: saveStarted })
+        }
+      }
 
       if (!online) {
         pushOffline(offlineText(t))
@@ -254,6 +272,7 @@ export function JimbotChat({ embedded }: { embedded?: boolean }) {
 
       const ai = await askJimbot({
         message: clean,
+        locale: lang,
         conversationId: conversationId.current ?? null,
         planningContext: planningRef.current,
         explicitConfirmed: opts.explicitConfirmed,
@@ -261,13 +280,15 @@ export function JimbotChat({ embedded }: { embedded?: boolean }) {
       })
 
       if (ai.ok) {
-        planningRef.current = {
-          itineraryDraft: ai.bot.itineraryDraft ?? null,
-          places: ai.bot.places ?? [],
-          map: ai.bot.map ?? null,
-          budget: ai.bot.budget ?? null,
+        if (ai.bot.itineraryDraft || (!planningRef.current?.itineraryDraft && (ai.bot.places?.length || ai.bot.map || ai.bot.budget))) {
+          planningRef.current = {
+            itineraryDraft: ai.bot.itineraryDraft ?? null,
+            places: ai.bot.places ?? [],
+            map: ai.bot.map ?? null,
+            budget: ai.bot.budget ?? null,
+          }
         }
-        const botId = `b${Date.now()}`
+        const botId = `b${crypto.randomUUID()}`
         const intent = ai.bot.refusal
           ? 'refuse'
           : opts.explicitConfirmed
@@ -276,6 +297,7 @@ export function JimbotChat({ embedded }: { embedded?: boolean }) {
               ? 'plan'
               : 'clarify'
         const outcome = ai.bot.refusal ? 'refusal' : ai.bot.itineraryDraft ? 'cards' : 'clarify'
+        pendingReplyTiming.current = { id: botId, start: started, traceId: ai.traceId }
         setMessages((m) => [...m, { id: botId, role: 'bot', expression: ai.bot.refusal ? 'unsure' : 'idea', ...ai.bot }])
         await saveMessage('bot', ai.bot.text, intent, { ...(ai.payload ?? {}), outcome })
         if (ai.savedItineraryId) {
@@ -294,7 +316,7 @@ export function JimbotChat({ embedded }: { embedded?: boolean }) {
       }
 
       const failText = opts.explicitConfirmed ? saveFailText(t) : offlineText(t)
-      pushOffline(failText)
+      pushOffline(failText, ai.traceId)
       pendingShare.current = false
       await saveMessage('bot', failText, 'offline')
     } catch (error) {

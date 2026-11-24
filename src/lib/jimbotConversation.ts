@@ -40,7 +40,8 @@ export function restoreJimbotConversation(rows: StoredMessage[], welcome: Msg, r
     }
     if (row.intent === 'offline' && latestUserMessage) bot.retryText = latestUserMessage
 
-    if (payload.itineraryDraft || (Array.isArray(payload.places) && payload.places.length) || payload.budget || payload.map) {
+    if (payload.itineraryDraft || (!planningContext?.itineraryDraft &&
+      ((Array.isArray(payload.places) && payload.places.length) || payload.budget || payload.map))) {
       planningContext = {
         itineraryDraft: payload.itineraryDraft ?? null,
         places: payload.places ?? [],

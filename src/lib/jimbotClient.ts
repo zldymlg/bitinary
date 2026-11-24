@@ -6,13 +6,13 @@ import type {
   JimbotPlaceRef,
   Msg,
 } from '@/data/chat'
-import { resolveBusinessImage } from '@/biz/db/assets'
 import { supabase } from '@/lib/supabase'
 
 export type JimbotBotFields = Omit<Extract<Msg, { role: 'bot' }>, 'id' | 'role' | 'expression'>
 
 export type JimbotAiRequest = {
   message: string
+  locale?: 'en' | 'tl'
   conversationId?: string | null
   planningContext?: Record<string, unknown> | null
   explicitConfirmed?: boolean
@@ -24,6 +24,7 @@ export type JimbotAiResult = {
   bot: JimbotBotFields
   payload: Record<string, unknown> | null
   savedItineraryId?: string | null
+  traceId?: string
 }
 
 const FALLBACK_TEXT = 'Hindi ako makasagot ngayon. Subukan ulit mamaya.'
@@ -42,7 +43,6 @@ type BizRow = {
   latitude: number | null
   longitude: number | null
   cover_url: string | null
-  photo?: string | null
 }
 
 function collectIds(bot: JimbotBotFields): string[] {
@@ -64,7 +64,7 @@ function displayFrom(row: BizRow | undefined): JimbotPlaceDisplay {
     city: row.city,
     address: row.address,
     priceRange: row.price_range,
-    photo: row.photo ?? row.cover_url,
+    photo: row.cover_url,
     lat: row.latitude ?? undefined,
     lng: row.longitude ?? undefined,
   }
@@ -86,19 +86,7 @@ async function hydrateBot(bot: JimbotBotFields): Promise<JimbotBotFields> {
     return bot
   }
 
-  const rows = await Promise.all(
-    data.map(async (raw) => {
-      const row = raw as BizRow
-      if (!row.cover_url) return row
-      try {
-        return { ...row, photo: await resolveBusinessImage(row.cover_url) }
-      } catch (photoError) {
-        console.error(`Jimbot place photo hydrate failed for ${row.id}`, photoError)
-        return row
-      }
-    }),
-  )
-  const byId = new Map(rows.map((row) => [row.id, row]))
+  const byId = new Map((data as BizRow[]).map((row) => [row.id, row]))
 
   const places: JimbotPlaceRef[] | undefined = bot.places?.map((p) => ({
     ...p,
@@ -152,6 +140,7 @@ export async function askJimbot(req: JimbotAiRequest): Promise<JimbotAiResult> {
   try {
     const body = {
       message: req.message,
+      locale: req.locale,
       conversationId: req.conversationId ?? null,
       planningContext: req.planningContext ?? null,
       explicitConfirmed: req.explicitConfirmed ?? false,
@@ -159,32 +148,40 @@ export async function askJimbot(req: JimbotAiRequest): Promise<JimbotAiResult> {
     }
 
     let data: unknown
-    if (JIMBOT_FUNCTION_URL) {
-      const { data: auth } = await supabase.auth.getSession()
-      const res = await fetch(JIMBOT_FUNCTION_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(auth.session?.access_token ? { Authorization: `Bearer ${auth.session.access_token}` } : {}),
-        },
-        body: JSON.stringify(body),
-      })
-      if (!res.ok) return fail
-      data = await res.json()
-    } else {
-      const result = await supabase.functions.invoke('jimbot', { body })
-      if (result.error) return fail
-      data = result.data
+    let traceId: string | undefined
+    const requestStarted = performance.now()
+    try {
+      if (JIMBOT_FUNCTION_URL) {
+        const { data: auth } = await supabase.auth.getSession()
+        const res = await fetch(JIMBOT_FUNCTION_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(auth.session?.access_token ? { Authorization: `Bearer ${auth.session.access_token}` } : {}),
+          },
+          body: JSON.stringify(body),
+        })
+        traceId = res.headers.get('X-Jimbot-Trace-Id') ?? undefined
+        if (!res.ok) return { ...fail, traceId }
+        data = await res.json()
+      } else {
+        const result = await supabase.functions.invoke('jimbot', { body })
+        traceId = result.response?.headers.get('X-Jimbot-Trace-Id') ?? undefined
+        if (result.error) return { ...fail, traceId }
+        data = result.data
+      }
+    } finally {
+      performance.measure('jimbot:edge', { start: requestStarted, detail: { traceId } })
     }
     if (!data || typeof data !== 'object') {
-      return fail
+      return { ...fail, traceId }
     }
     const d = data as Record<string, any>
     const text = String(d.message ?? d.text ?? '').trim()
     // Edge function returns its own generic fallback (with a warning) when the model call fails.
     const warnings = arr<string>(d.warnings)
     const tempIssue = !!warnings?.some((w) => w.startsWith('Temporary issue'))
-    if (!text || tempIssue) return fail
+    if (!text || tempIssue) return { ...fail, traceId }
     const map = d.map && Array.isArray(d.map.businessIds) && d.map.businessIds.length ? d.map : null
     const raw: JimbotBotFields = {
       text,
@@ -197,10 +194,12 @@ export async function askJimbot(req: JimbotAiRequest): Promise<JimbotAiResult> {
       warnings,
       refusal: d.refusal ?? null,
     }
+    const hydrationStarted = performance.now()
     const bot = await hydrateBot(raw)
+    performance.measure('jimbot:hydrate', { start: hydrationStarted, detail: { traceId } })
     const { text: _t, ...structured } = bot
     const savedItineraryId = typeof d.savedItineraryId === 'string' ? d.savedItineraryId : null
-    return { ok: true, bot, payload: structured as Record<string, unknown>, savedItineraryId }
+    return { ok: true, bot, payload: structured as Record<string, unknown>, savedItineraryId, traceId }
   } catch (e) {
     console.error('Jimbot AI call failed', e)
     return fail

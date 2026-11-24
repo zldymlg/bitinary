@@ -25,6 +25,11 @@ assert.deepEqual(restored.planningContext, {
 })
 assert.equal(restored.messages.at(-1).retryText, 'Make it cheaper')
 assert.equal(restored.messages.some((message) => message.id === 'f1'), false)
+const afterSearch = restoreJimbotConversation([...rows, {
+  id: 'b3', role: 'bot', content: 'Here are the matches', intent: 'clarify',
+  payload: { places: [{ businessId: 'other-place' }] },
+}], welcome, 'Try again later')
+assert.deepEqual(afterSearch.planningContext, restored.planningContext)
 const unanswered = restoreJimbotConversation(rows.slice(0, 1), welcome, 'Try again later')
 assert.equal(unanswered.messages.at(-1).text, 'Try again later')
 assert.equal(unanswered.messages.at(-1).retryText, 'Plan a day in Cebu')

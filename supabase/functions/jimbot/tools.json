@@ -7,13 +7,18 @@
     "parameters": {
       "type": "object",
       "properties": {
+        "purpose": {
+          "type": "string",
+          "enum": ["recommendation", "planning"],
+          "description": "Use recommendation only for a standalone place search with an explicit city and no requested itinerary, revision, comparison, or explanation. Otherwise use planning."
+        },
         "area": {
           "type": ["string", "null"],
           "description": "City or area to search, for example \"Quezon City\". Required for search; if unknown, ask the user instead of calling with null."
         },
         "query": {
           "type": ["string", "null"],
-          "description": "Short search phrase for business name, type, specialty, or vibe, for example \"budget seafood\". Use null when filters are enough."
+            "description": "Short search phrase for business name, specialty, or vibe, for example \"budget seafood\". Use null when city and category filters are enough."
         },
         "businessType": {
           "type": ["string", "null"],
@@ -26,7 +31,7 @@
           "maximum": 10
         }
       },
-      "required": ["area", "query", "businessType", "maxResults"],
+      "required": ["purpose", "area", "query", "businessType", "maxResults"],
       "additionalProperties": false
     }
   },

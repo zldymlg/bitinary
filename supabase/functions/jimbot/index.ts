@@ -1,7 +1,8 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import OpenAI from "openai";
-import Ajv2020 from "ajv/dist/2020.js";
+import { Ajv2020 } from "ajv/dist/2020.js";
 import { SYSTEM_PROMPT } from "./system_prompt.ts";
+import { quickReply, searchTermsMatch, standaloneSearch } from "./latency.ts";
 import {
   normalizeItineraryDraft,
   pickDiverseStops,
@@ -18,6 +19,7 @@ type ChatHistoryItem = {
 };
 
 type JimbotRequest = {
+  locale?: "en" | "tl";
   message?: string;
   conversationId?: string | null;
   planningContext?: Json | null;
@@ -45,7 +47,9 @@ type ToolResult = {
 
 const OPENCODE_MODEL = Deno.env.get("OPENCODE_MODEL") ?? "hy4-flash-free";
 const OPENCODE_BASE_URL = Deno.env.get("OPENCODE_BASE_URL") ?? "https://opencode.ai/zen/go/v1";
-const OPENCODE_API_KEY = Deno.env.get("OPENCODE_API_KEY");
+const provider = Deno.env.get("JIMBOT_PROVIDER") === "openai" ? "openai" : "opencode";
+const model = provider === "openai" ? "gpt-6-luna" : OPENCODE_MODEL;
+const modelKey = Deno.env.get(provider === "openai" ? "OPENAI_API_KEY" : "OPENCODE_API_KEY");
 const MAX_TOOL_ROUNDS = 2; // total model calls = 1 initial + up to 2 continuations
 const EMBEDDING_API_KEY = Deno.env.get("EMBEDDING_API_KEY");
 const EMBEDDING_BASE_URL = (Deno.env.get("EMBEDDING_BASE_URL") ?? "https://openrouter.ai/api/v1").replace(/\/$/, "");
@@ -63,17 +67,18 @@ if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
 
 const TOOLS_FOR_CHAT = buildChatTools(TOOLS);
 const ajv = new Ajv2020({ allErrors: true, strict: false });
-const validateFinalResponse = ajv.compile(withServerOnlyDraftFields(RESPONSE_SCHEMA_RAW));
+const validateFinalResponse = ajv.compile<Record<string, any>>(withServerOnlyDraftFields(RESPONSE_SCHEMA_RAW));
 
 // OpenAI SDK used as an OpenAI-compatible client for the OpenCode gateway.
-const client = OPENCODE_API_KEY
-  ? new OpenAI({ apiKey: OPENCODE_API_KEY, baseURL: OPENCODE_BASE_URL })
+const client = modelKey
+  ? new OpenAI({ apiKey: modelKey, baseURL: provider === "openai" ? "https://api.openai.com/v1" : OPENCODE_BASE_URL })
   : null;
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-idempotency-key",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Expose-Headers": "X-Jimbot-Trace-Id, Server-Timing",
 };
 
 const RATE_LIMIT_WINDOW_MS = 60_000;
@@ -98,11 +103,75 @@ const FALLBACK_RESPONSE = {
   refusal: null,
 };
 
+function requestTiming() {
+  const started = performance.now();
+  const traceId = crypto.randomUUID();
+  const durations: Record<string, number> = {};
+  const events: string[] = [];
+  const usage: { input: number; output: number; cached?: number }[] = [];
+  let modelCalls = 0;
+  return {
+    events,
+    async measure<T>(name: string, operation: () => Promise<T>): Promise<T> {
+      const start = performance.now();
+      try {
+        return await operation();
+      } finally {
+        durations[name] = (durations[name] ?? 0) + Math.round(performance.now() - start);
+      }
+    },
+    async complete(messages: ChatMessage[], tools: boolean, headers: Record<string, string>) {
+      const params = {
+        model,
+        messages: messages as any,
+        ...(tools ? { tools: TOOLS_FOR_CHAT as any } : {}),
+      };
+      const response = await this.measure(`model_${++modelCalls}`, () => provider === "openai"
+        // SDK v4 predates the "none" reasoning effort accepted by this endpoint.
+        ? client!.post<typeof params & { reasoning_effort: "none" }, OpenAI.ChatCompletion>(
+          "/chat/completions", { body: { ...params, reasoning_effort: "none" } }
+        )
+        : client!.chat.completions.create(params, { headers }));
+      if (response.usage) {
+        usage.push({
+          input: response.usage.prompt_tokens,
+          output: response.usage.completion_tokens,
+          cached: response.usage.prompt_tokens_details?.cached_tokens,
+        });
+      }
+      return response;
+    },
+    respond(body: unknown, status = 200, headers: Record<string, string> = {}, outcome = "reply") {
+      durations.total = Math.round(performance.now() - started);
+      console.log(JSON.stringify({
+        event: "jimbot_timing", traceId, provider, model, status, modelCalls, durations, usage, events,
+        outcome: status >= 400 ? "http_error" : body === FALLBACK_RESPONSE ? "fallback" : outcome,
+      }));
+      return jsonResponse(body, status, {
+        ...headers,
+        "X-Jimbot-Trace-Id": traceId,
+        "Server-Timing": Object.entries(durations).map(([key, ms]) => `${key};dur=${ms}`).join(", "),
+      });
+    },
+  };
+}
+
+type RequestTiming = ReturnType<typeof requestTiming>;
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: CORS_HEADERS });
   }
+  const timing = requestTiming();
+  try {
+    return await handleRequest(req, timing);
+  } catch {
+    return timing.respond(FALLBACK_RESPONSE);
+  }
+});
 
+async function handleRequest(req: Request, timing: RequestTiming) {
+  const jsonResponse = timing.respond;
   if (req.method !== "POST") {
     return jsonResponse({ error: "Method not allowed" }, 405);
   }
@@ -130,9 +199,16 @@ Deno.serve(async (req) => {
     return jsonResponse({ error: "Missing required field: message" }, 400);
   }
 
+  if (body.explicitConfirmed !== true) {
+    const greeting = quickReply(body.message, body.locale);
+    if (greeting) {
+      return jsonResponse({ ...FALLBACK_RESPONSE, message: greeting, warnings: [] }, 200, {}, "greeting");
+    }
+  }
+
   const bearerToken = getBearerToken(req.headers.get("Authorization"));
   const supabase = createSupabaseClient(bearerToken);
-  const userId = await getUserId(supabase);
+  const userId = await timing.measure("auth", () => getUserId(supabase));
 
   // OpenCode Go routes by conversation and needs a distinct user agent.
   const modelRequestHeaders = {
@@ -148,7 +224,7 @@ Deno.serve(async (req) => {
   // Seed from client planningContext (last draft/places), then re-verify live+verified in DB.
   const contextCandidateIds = collectBusinessIds(body.planningContext ?? {});
   if (contextCandidateIds.length > 0) {
-    for (const id of await fetchVerifiedBusinessIdSet(supabase, contextCandidateIds)) {
+    for (const id of await timing.measure("context", () => fetchVerifiedBusinessIdSet(supabase, contextCandidateIds))) {
       trustedBusinessIds.add(id);
     }
   }
@@ -195,23 +271,17 @@ Deno.serve(async (req) => {
   }
 
   if (!client) {
-    console.error("jimbot: OPENCODE_API_KEY missing");
+    console.error("jimbot: model credential missing", provider);
     return jsonResponse(FALLBACK_RESPONSE, 200);
   }
 
   try {
     const messages = buildChatMessages(body);
 
-    let response = await client.chat.completions.create(
-      {
-        model: OPENCODE_MODEL,
-        messages: messages as any,
-        tools: TOOLS_FOR_CHAT as any,
-      },
-      { headers: modelRequestHeaders },
-    );
+    let response = await timing.complete(messages, true, modelRequestHeaders);
 
     let earlyPlan: Record<string, unknown> | null = null;
+    let directSearch: Record<string, unknown> | null = null;
     // Skip early synth on save confirms (handled above); keep for normal plan asks.
     const wantsPlan = looksLikePlanRequest(body.message);
 
@@ -228,26 +298,36 @@ Deno.serve(async (req) => {
         tool_calls: calls,
       } as any);
       for (const call of calls) {
-        const toolResult = await runToolCall(
-          {
-            name: call.function?.name,
-            arguments: call.function?.arguments,
-          },
-          toolContext,
+        const args = parseToolArgs(call.function?.arguments);
+        const direct = i === 0 && calls.length === 1 &&
+          call.function?.name === "search_verified_businesses" &&
+          !!args && standaloneSearch(args, body.message);
+        const toolResult = await timing.measure("tools", () =>
+          runToolCall(call.function?.name, args, toolContext, timing, direct)
         );
+        if (direct && !toolResult.ok) return jsonResponse(FALLBACK_RESPONSE);
+        if (direct && toolResult.exact === true && Array.isArray(toolResult.businesses)) {
+          const places = toolResult.businesses.map(({ businessId }: { businessId: string }) => ({ businessId, reason: null }));
+          const message = places.length
+            ? (body.locale === "en" ? "Here are the verified places I found." : "Eto ang mga verified na lugar na nahanap ko.")
+            : (body.locale === "en" ? "No verified places matched. Try another city or category?" : "Walang verified na tugma. Subukan natin ang ibang lungsod o kategorya?");
+          directSearch = { ...FALLBACK_RESPONSE, message, places, warnings: [] };
+          break;
+        }
         messages.push({
           role: "tool",
           tool_call_id: call.id,
           content: JSON.stringify(toolResult),
         } as any);
       }
+      if (directSearch) break;
 
       // Prefer correctness + latency: once search returned enough places for a plan, synthesize locally.
       if (wantsPlan && toolContext.trustedBusinessIds.size >= 3) {
         console.error(
           `jimbot: early synthesize after tools (trusted=${toolContext.trustedBusinessIds.size})`,
         );
-        earlyPlan = await buildFallbackPlanFromTrustedIds(supabase, toolContext, body.message);
+        earlyPlan = await timing.measure("draft", () => buildFallbackPlanFromTrustedIds(supabase, toolContext, body.message));
         break;
       }
 
@@ -262,20 +342,13 @@ Deno.serve(async (req) => {
         });
       }
 
-      response = await client.chat.completions.create(
-        {
-          model: OPENCODE_MODEL,
-          messages: messages as any,
-          ...(isLastRound ? {} : { tools: TOOLS_FOR_CHAT as any }),
-        },
-        { headers: modelRequestHeaders },
-      );
+      response = await timing.complete(messages, !isLastRound, modelRequestHeaders);
     }
 
-    let parsed = earlyPlan ?? parseStructuredResponse(response);
+    let parsed = directSearch ?? earlyPlan ?? parseStructuredResponse(response);
     if (!parsed && toolContext.trustedBusinessIds.size > 0) {
       console.error("jimbot: synthesizing plan from trusted tool IDs after parse miss");
-      parsed = await buildFallbackPlanFromTrustedIds(supabase, toolContext, body.message);
+      parsed = await timing.measure("draft", () => buildFallbackPlanFromTrustedIds(supabase, toolContext, body.message));
     }
     if (!parsed) {
       console.error("jimbot: failed to parse structured response", {
@@ -288,7 +361,12 @@ Deno.serve(async (req) => {
       return jsonResponse(FALLBACK_RESPONSE, 200);
     }
 
-    const sanitized = await sanitizeAndRevalidateBusinessIds(parsed, supabase, toolContext);
+    const sanitized = await timing.measure("normalize", () =>
+      sanitizeAndRevalidateBusinessIds(parsed, supabase, toolContext, directSearch !== null)
+    );
+    if (directSearch && Array.isArray(directSearch.places) && directSearch.places.length > 0 && sanitized.places.length === 0) {
+      return jsonResponse(FALLBACK_RESPONSE);
+    }
     if (!validateFinalResponse(sanitized)) {
       console.error("jimbot: schema validation failed", validateFinalResponse.errors);
       return jsonResponse(FALLBACK_RESPONSE, 200);
@@ -303,12 +381,12 @@ Deno.serve(async (req) => {
         { type: "open_help", label: "Kailangan ng tao?", businessId: null },
       ];
     }
-    return jsonResponse(sanitized, 200);
+    return jsonResponse(sanitized, 200, {}, directSearch ? "recommendation" : sanitized.refusal ? "refusal" : "reply");
   } catch (error) {
-    console.error("jimbot: OpenCode loop failed", error);
+    console.error("jimbot: model loop failed", error instanceof Error ? error.name : "unknown");
     return jsonResponse(FALLBACK_RESPONSE, 200);
   }
-});
+}
 
 function createSupabaseClient(accessToken: string | null): SupabaseClient {
   return createClient(SUPABASE_URL!, SUPABASE_ANON_KEY!, {
@@ -392,23 +470,28 @@ function buildChatMessages(body: JimbotRequest): ChatMessage[] {
 
   messages.push({
     role: "user",
-    content: `User message: ${body.message}\n\nRuntime context JSON:\n${JSON.stringify(metadata)}`,
+    content: `User message: ${body.message}\n\nRuntime context JSON:\n${JSON.stringify(metadata, (key, value) =>
+      key === "photo" || key === "pins" ? undefined : value
+    )}`,
   });
 
   return messages;
 }
 
-async function runToolCall(call: any, context: ToolContext): Promise<ToolResult> {
-  let args: Record<string, unknown>;
+function parseToolArgs(raw: string | undefined): Record<string, unknown> | null {
   try {
-    args = call.arguments ? JSON.parse(call.arguments) : {};
+    const value = raw ? JSON.parse(raw) : {};
+    return value && typeof value === "object" && !Array.isArray(value) ? value : null;
   } catch {
-    return { ok: false, code: "invalid_argument", message: "Invalid JSON arguments" };
+    return null;
   }
+}
 
-  switch (call.name) {
+async function runToolCall(name: string | undefined, args: Record<string, unknown> | null, context: ToolContext, timing: RequestTiming, strictSearch: boolean): Promise<ToolResult> {
+  if (!args) return { ok: false, code: "invalid_argument", message: "Invalid JSON arguments" };
+  switch (name) {
     case "search_verified_businesses":
-      return await searchVerifiedBusinesses(args, context);
+      return await timing.measure("search", () => searchVerifiedBusinesses(args, context, timing, strictSearch));
     case "get_business_details":
       return await getBusinessDetails(args, context);
     case "get_user_preferences":
@@ -453,11 +536,13 @@ function fitEmbedding(embedding: unknown): number[] | null {
   return vector.map((n) => n / norm);
 }
 
-async function embedQueryText(text: string): Promise<number[] | null> {
+async function embedQueryText(text: string): Promise<number[] | "timeout" | null> {
   if (!EMBEDDING_API_KEY || !text.trim()) return null;
+  const signal = AbortSignal.timeout(1000);
   try {
     const res = await fetch(`${EMBEDDING_BASE_URL}/embeddings`, {
       method: "POST",
+      signal,
       headers: {
         Authorization: `Bearer ${EMBEDDING_API_KEY}`,
         "Content-Type": "application/json",
@@ -468,15 +553,16 @@ async function embedQueryText(text: string): Promise<number[] | null> {
       }),
     });
     if (!res.ok) {
-      console.error("jimbot: embedding HTTP", res.status, await res.text());
+      console.error("jimbot: embedding HTTP", res.status);
       return null;
     }
     const json = await res.json();
     const embedding = fitEmbedding(json?.data?.[0]?.embedding);
     if (!embedding) console.error("jimbot: embedding dimensions mismatch, using ilike fallback");
     return embedding;
-  } catch (error) {
-    console.error("jimbot: embedding failed", error);
+  } catch {
+    if (signal.aborted) return "timeout";
+    console.error("jimbot: embedding failed");
     return null;
   }
 }
@@ -499,7 +585,7 @@ function mapBusinessRows(rows: any[], context: ToolContext) {
   });
 }
 
-async function searchVerifiedBusinesses(args: Record<string, unknown>, context: ToolContext): Promise<ToolResult> {
+async function searchVerifiedBusinesses(args: Record<string, unknown>, context: ToolContext, timing: RequestTiming, strict: boolean): Promise<ToolResult> {
   const area = typeof args.area === "string" ? args.area.trim() : null;
   const query = typeof args.query === "string" ? args.query.trim() : null;
   const businessType = typeof args.businessType === "string" ? args.businessType.trim() : null;
@@ -511,8 +597,9 @@ async function searchVerifiedBusinesses(args: Record<string, unknown>, context: 
 
   // Hybrid path: city filter + vector rank when embeddings exist.
   const phrase = [area, businessType, query].filter(Boolean).join(" ");
-  const embedding = await embedQueryText(phrase);
-  if (embedding) {
+  const embedding = query && EMBEDDING_API_KEY ? await timing.measure("embedding", () => embedQueryText(phrase)) : null;
+  if (embedding === "timeout") timing.events.push("embedding_timeout");
+  if (Array.isArray(embedding)) {
     const { data: hybrid, error: hybridError } = await context.supabase.rpc("search_businesses_hybrid", {
       p_area: area,
       p_query_embedding: embedding,
@@ -526,12 +613,18 @@ async function searchVerifiedBusinesses(args: Record<string, unknown>, context: 
           const t = String(row.business_type ?? "").toLowerCase();
           return patterns.some((p) => t.includes(p.toLowerCase()));
         });
-        if (typed.length) rows = typed;
+        if (strict || typed.length) rows = typed;
       }
-      return { ok: true, businesses: mapBusinessRows(rows.slice(0, maxResults), context), rankedBy: "embedding" };
+      if (strict && query) {
+        rows = rows.filter((row) => searchTermsMatch(query, row.name ?? "", row.about ?? "", (row.specialties ?? []).join(" ")));
+      }
+      if (!strict || rows.length) {
+        return { ok: true, exact: strict, businesses: mapBusinessRows(rows.slice(0, maxResults), context), rankedBy: "embedding" };
+      }
     }
     if (hybridError) console.error("jimbot: hybrid search fallback", hybridError.message);
   }
+  if (query && EMBEDDING_API_KEY) timing.events.push("keyword_fallback");
 
   // Keyword fallback: city + live + verified, then filter type/query in memory.
   const { data, error } = await context.supabase
@@ -553,9 +646,11 @@ async function searchVerifiedBusinesses(args: Record<string, unknown>, context: 
       const t = String(row.business_type ?? "").toLowerCase();
       return patterns.some((p) => t.includes(p.toLowerCase()));
     });
-    if (typed.length) rows = typed;
+    if (strict || typed.length) rows = typed;
   }
-  if (query) {
+  if (query && strict) {
+    rows = rows.filter((row) => searchTermsMatch(query, row.name ?? "", row.about ?? "", (row.specialties ?? []).join(" ")));
+  } else if (query) {
     const escaped = query.replace(/[^\p{L}\p{N}\s'-]/gu, " ").trim().toLowerCase();
     if (escaped) {
       const tokens = escaped.split(/\s+/).filter(Boolean);
@@ -569,6 +664,7 @@ async function searchVerifiedBusinesses(args: Record<string, unknown>, context: 
 
   return {
     ok: true,
+    exact: strict && (rows.length > 0 || (data?.length ?? 0) < 40),
     businesses: mapBusinessRows(rows.slice(0, maxResults), context),
     rankedBy: "ilike",
   };
@@ -1100,11 +1196,12 @@ async function sanitizeAndRevalidateBusinessIds(
   payload: any,
   supabase: SupabaseClient,
   toolContext?: ToolContext,
+  recommendationOnly = false,
 ): Promise<any> {
   const clone = structuredClone(payload ?? {});
   const ids = collectBusinessIds(clone);
   // Also trust IDs discovered during this turn's tool loop.
-  if (toolContext) {
+  if (toolContext && !recommendationOnly) {
     for (const id of toolContext.trustedBusinessIds) ids.push(id);
   }
   const validIds = await fetchVerifiedBusinessIdSet(supabase, [...new Set(ids)]);
@@ -1119,7 +1216,7 @@ async function sanitizeAndRevalidateBusinessIds(
     : [];
 
   // Hydrate places from tool-trusted IDs when the model returned none.
-  if ((!Array.isArray(clone.places) || clone.places.length === 0) && toolContext) {
+  if (!recommendationOnly && clone.places.length === 0 && toolContext) {
     const trusted = [...toolContext.trustedBusinessIds].filter((id) => validIds.has(id));
     if (trusted.length > 0) {
       clone.places = trusted.map((businessId) => ({ businessId, reason: null }));
@@ -1133,7 +1230,7 @@ async function sanitizeAndRevalidateBusinessIds(
   const draftHasStops =
     Array.isArray(clone.itineraryDraft?.days) &&
     clone.itineraryDraft.days.some((d: any) => Array.isArray(d?.stops) && d.stops.length > 0);
-  if (!draftHasStops && placeIds.length > 0) {
+  if (!recommendationOnly && !draftHasStops && placeIds.length > 0) {
     clone._planHints = parsePlanHints(toolContext?.userMessage ?? "");
     clone.itineraryDraft = await synthesizeDraftFromIds(supabase, placeIds, clone);
     delete clone._planHints;

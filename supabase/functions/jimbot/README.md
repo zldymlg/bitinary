@@ -17,6 +17,8 @@ Optional settings:
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `OPENCODE_MODEL` | `hy4-flash-free` | Chat model id on the gateway |
+| `JIMBOT_PROVIDER` | `opencode` | Set to `openai` in staging to compare direct GPT-6 Luna. |
+| `OPENAI_API_KEY` | unset | Server secret for the direct OpenAI candidate. |
 | `OPENCODE_BASE_URL` | `https://opencode.ai/zen/go/v1` | Gateway base URL |
 | `EMBEDDING_API_KEY` | unset | Optional OpenRouter key for hybrid search. Without it, search falls back to `ilike` text matching |
 | `EMBEDDING_BASE_URL` | `https://openrouter.ai/api/v1` | Embedding endpoint base URL |
@@ -37,6 +39,8 @@ EMBEDDING_MODEL=nvidia/nemotron-3.5-embed-1b:free
 `SUPABASE_URL` and `SUPABASE_ANON_KEY` are injected by the local Supabase stack, so they do not need to be in `.env.local`.
 
 ## Embeddings (optional)
+
+Jimbot only requests a query embedding when the tool provides a search phrase. If the embedding request exceeds one second, it uses text search. The timing log records embedding timeouts and keyword fallbacks.
 
 Hybrid search needs vectors in `business_embeddings`. After resetting or reseeding the DB, run:
 
@@ -79,3 +83,13 @@ Both read `.env.local`, which needs `OPENCODE_API_KEY`, `SUPABASE_URL` and `SUPA
 ```
 
 `Authorization: Bearer <supabase-user-jwt>` is optional for public planning tools, but required for user-scoped tools and `save_itinerary`.
+
+## Latency benchmark
+
+Use a staging branch with both fixtures and credentials. Seed a city with at least three live verified places, including a cafe, and leave Testville empty. Use the same fixture data and authenticated test user for the baseline, optimized OpenCode, and direct OpenAI runs.
+
+- Run `node scripts/benchmark-jimbot.mjs` with `JIMBOT_BENCH_URL` set to the staging function URL. Set `JIMBOT_BENCH_API_KEY` to the staging publishable key and `JIMBOT_BENCH_USER_TOKEN` to the test user's session token as needed. The defaults are 30 samples per category and Quezon City. Override with `JIMBOT_BENCH_SAMPLES` and `JIMBOT_BENCH_CITY`. Treat the setup and warm-up requests separately from the reported samples.
+- Join the output to the Supabase `jimbot_timing` console logs using the trace IDs. Model call count is unavailable for releases without timing headers. Use usage totals and provider billing to compare cost per successful reply.
+- In the frontend preview, exercise the same prompts and reopen the itinerary chat before the revision. Read `performance.getEntriesByType('measure').filter(entry => entry.name.startsWith('jimbot:'))` for message save, Edge Function, hydration, and reply render timings. Use the first request after an observed runtime boot as the cold-start sample.
+- Compare verified matches and itinerary quality alongside p50, p95, and error rates. The targets are p50 under 2 s for greetings, under 5 s for simple place searches, and at least 25% lower p50 for itineraries, with no category p95 or quality regression. Change providers only with a gain of at least 20% on model-dependent turns and no added cost per successful reply.
+- Deploy the function before the frontend. Monitor for 24 hours after release and revert the provider setting or redeploy the previous function if latency or errors regress. Consider progress streaming only if model or tool work still leaves itinerary p95 above 8 s. Keep the existing message save ordering unless the browser timings identify it as a bottleneck.

@@ -8,7 +8,7 @@
     "prebuild": "npm run test:jimbot-ai && npm run test:auth && npm run test:business",
     "build": "vite build",
     "test:jimbot": "npm run test:jimbot-ai",
-    "test:jimbot-ai": "node tests/jimbot-ai/sanitize-schema.mjs && node tests/jimbot-ai/parse-plan-hints.mjs && node tests/jimbot-ai/normalize-itinerary.mjs && node tests/jimbot-ai/jimbot-trip.mjs && node tests/jimbot-ai/run.mjs",
+    "test:jimbot-ai": "node tests/jimbot-ai/latency.mjs && node tests/jimbot-conversation-state.mjs && node tests/jimbot-ai/sanitize-schema.mjs && node tests/jimbot-ai/parse-plan-hints.mjs && node tests/jimbot-ai/normalize-itinerary.mjs && node tests/jimbot-ai/jimbot-trip.mjs && node tests/jimbot-ai/run.mjs",
     "test:business": "node tests/business-analytics.mjs && node tests/business-quick-update.mjs && node tests/biz-owner-persistence.mjs && node tests/verification-workflow.mjs",
     "embed:businesses": "node scripts/embed-businesses.mjs",
     "test:auth": "node tests/auth-flow.mjs",
