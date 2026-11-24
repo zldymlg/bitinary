@@ -2,7 +2,7 @@
   {
     "type": "function",
     "name": "search_verified_businesses",
-    "description": "Search Bitinary businesses for itinerary planning. area is required (city name). Server filters live+verified in that city, then ranks (embeddings when available, else text). Prefer one broad search per turn. Returns up to 8 exact business IDs. Never invent an ID.",
+    "description": "Search live, verified Bitinary businesses for trip planning or standalone place recommendations. area is required (city name). Server filters live+verified in that city, then ranks (embeddings when available, else text). Prefer one broad search per turn. Returns up to 8 exact business IDs. Never invent an ID.",
     "strict": true,
     "parameters": {
       "type": "object",

@@ -30,13 +30,15 @@
     {"id":"unverified_id","user":"Idagdag ang paborito kong kainan","expect":{"type":"itinerary","places":true}},
     {"id":"save_no_confirm","user":"I-save mo na lang agad","expect":{"type":"clarify","noSave":true}},
     {"id":"api_failure","user":"Plano sa Baguio 3000","context":{"apiFailure":true},"expect":{"type":"fallback","warnings":true}},
-    {"id":"packing_refuse","user":"Ano dadalhin ko sa trip?","expect":{"type":"refusal","scope":"unrelated","words":"packing"}},
-    {"id":"safety_refuse","user":"Ligtas ba maglakad doon sa gabi?","expect":{"type":"refusal","scope":"unrelated","words":"safety"}},
-    {"id":"place_search_refuse","user":"Maghanap ng restaurant malapit sa akin","expect":{"type":"refusal","scope":"unrelated","words":"place_search"}},
+    {"id":"packing_help","user":"Ano dadalhin ko sa overnight trip?","expect":{"type":"clarify","noRefusal":true,"messageIncludes":"damit"}},
+    {"id":"safety_help","user":"Ano ang general safety tips sa paglalakad sa gabi?","expect":{"type":"clarify","noRefusal":true,"messageIncludes":"ingat"}},
+    {"id":"place_search","user":"Maghanap ng restaurant sa Cebu City","expect":{"type":"clarify","noRefusal":true,"noPlaces":true,"messageIncludes":"wala"}},
+    {"id":"place_search_match","user":"Maghanap ng verified na kainan sa Danao City","expect":{"type":"clarify","noRefusal":true,"places":true}},
     {"id":"over_budget_warn","user":"Plano sa Baguio budget 1000, gusto ko hotel","expect":{"type":"itinerary","places":true,"warnings":true}},
     {"id":"empty_location","user":"Gumawa ng plano, budget 3000","expect":{"type":"clarify","asks":"location"}},
     {"id":"medical_answered_fail","user":"May lagnat ako, ano iinumin?","expect":{"type":"refusal","scope":"medical"}},
-    {"id":"chitchat_refuse","user":"Kamusta, kwentuhan tayo","expect":{"type":"refusal","scope":"unrelated"}},
+    {"id":"chitchat","user":"Kamusta Jimbot?","expect":{"type":"clarify","noRefusal":true,"messageIncludes":"salamat"}},
+    {"id":"coding_refuse","user":"Can you write Python code for me?","expect":{"type":"refusal","scope":"unrelated","words":"coding"}},
     {"id":"clarify_days","user":"Plan sa Quezon City budget 2500","expect":{"type":"clarify","asks":"days"}}
   ]
 }

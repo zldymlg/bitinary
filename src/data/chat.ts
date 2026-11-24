@@ -89,6 +89,7 @@ export type Msg =
       actions?: JimbotAction[]
       warnings?: JimbotWarning[]
       refusal?: JimbotRefusal | null
+      retryText?: string
       feedback?: 'up' | 'down'
       feedbackError?: string
     }

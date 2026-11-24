@@ -8,6 +8,7 @@ const WORDS = {
   packing: /packing|dadalhin|dalhin/i,
   safety: /safety|ligtas/i,
   place_search: /itinerary|budget/i,
+  coding: /code|coding|programming|programar/i,
   unrelated: /itinerary|budget|trip/i,
 }
 const EMOJI = /\p{Extended_Pictographic}/gu
@@ -82,6 +83,9 @@ export function scoreExpect(r, e) {
   const refused = isRefusal(r)
   const kind = refused ? 'refusal' : r.itineraryDraft ? 'itinerary' : 'clarify'
   const pins = Array.isArray(r.map) ? r.map : r.map?.businessIds ?? []
+  if (e.noRefusal && refused) add('scope', 'unexpected refusal')
+  if (e.messageIncludes && !String(r.message ?? '').toLowerCase().includes(e.messageIncludes.toLowerCase()))
+    add('message', `does not include ${e.messageIncludes}`)
   if (e.scope) {
     if (!refused) add('scope', `expected refusal for ${e.scope}, got ${kind}`)
     else {

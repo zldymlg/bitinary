@@ -1,4 +1,4 @@
-import { ArrowUp, ChevronLeft, ChevronRight, Clock3, MapPin, MessageSquareText, PiggyBank, Plus, ThumbsDown, ThumbsUp } from 'lucide-react'
+import { ArrowUp, ChevronLeft, ChevronRight, Clock3, MapPin, MessageSquareText, PiggyBank, Plus, RotateCw, ThumbsDown, ThumbsUp } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
@@ -18,6 +18,7 @@ import type { JimbotAction } from '@/data/chat'
 import { askJimbot } from '@/lib/jimbotClient'
 import { supabase } from '@/lib/supabase'
 import { useOnline } from '@/lib/useOnline'
+import { restoreJimbotConversation } from '@/lib/jimbotConversation'
 
 /* ============================ CHAT UI ============================== */
 type BotMsg = Extract<Msg, { role: 'bot' }>
@@ -38,15 +39,13 @@ const welcomeMessage = (t: LangT): Msg => ({
   quickReplies: [t('Gumawa ng itinerary', 'Make an itinerary'), t('Mag-budget', 'Set a budget'), 'Quezon City'],
 })
 
-const STRUCTURED_KEYS = ['places', 'itineraryDraft', 'budget', 'map', 'actions', 'warnings', 'refusal', 'quickReplies'] as const
-
 export function JimbotScreen() {
   return <JimbotChat />
 }
 
 export function JimbotChat({ embedded }: { embedded?: boolean }) {
   const { t } = useLang()
-  const [messages, setMessages] = useState<Msg[]>(() => [welcomeMessage(t)])
+  const [messages, setMessages] = useState<Msg[]>([])
   const [thinking, setThinking] = useState(false)
   const [input, setInput] = useState('')
   const [budgetOpen, setBudgetOpen] = useState(false)
@@ -54,9 +53,12 @@ export function JimbotChat({ embedded }: { embedded?: boolean }) {
   const [history, setHistory] = useState<Conversation[]>([])
   const [historyLoading, setHistoryLoading] = useState(true)
   const [historyError, setHistoryError] = useState(false)
+  const [historyReload, setHistoryReload] = useState(0)
   const [conversationError, setConversationError] = useState(false)
+  const [failedConversationId, setFailedConversationId] = useState<string | null>(null)
   const [switchingConversation, setSwitchingConversation] = useState(false)
   const conversationId = useRef<string | undefined>(undefined)
+  const conversationLoad = useRef(0)
   const listRef = useRef<HTMLDivElement>(null)
   const online = useOnline()
   const navigate = useNavigate()
@@ -70,10 +72,23 @@ export function JimbotChat({ embedded }: { embedded?: boolean }) {
 
   useEffect(() => {
     let active = true
+    setHistoryLoading(true)
+    setHistoryError(false)
     void (async () => {
-      const { data: auth } = await supabase.auth.getUser()
+      const { data: auth, error: authError } = await supabase.auth.getUser()
+      if (authError) {
+        console.error('Jimbot auth lookup failed', authError)
+        if (active) {
+          setHistoryError(true)
+          setHistoryLoading(false)
+        }
+        return
+      }
       if (!auth.user || !active) {
-        if (active) setHistoryLoading(false)
+        if (active) {
+          setMessages([welcomeMessage(t)])
+          setHistoryLoading(false)
+        }
         return
       }
       const { data, error } = await supabase
@@ -119,8 +134,14 @@ export function JimbotChat({ embedded }: { embedded?: boolean }) {
         title: firstMessage.get(conversation.id)?.slice(0, 52) || t('Bagong usapan', 'New chat'),
       }))
       setHistory(conversationList)
-      setHistoryLoading(false)
-      if (conversationList[0]) await openConversation(conversationList[0].id, activeCheck)
+      if (conversationList[0]) {
+        await openConversation(conversationList[0].id, activeCheck)
+      } else {
+        conversationId.current = undefined
+        planningRef.current = null
+        setMessages([welcomeMessage(t)])
+      }
+      if (active) setHistoryLoading(false)
     })()
 
     function activeCheck() {
@@ -129,11 +150,18 @@ export function JimbotChat({ embedded }: { embedded?: boolean }) {
 
     return () => {
       active = false
+      conversationLoad.current += 1
     }
-  }, [])
+  }, [historyReload])
 
   const openConversation = async (id: string, isActive: () => boolean = () => true) => {
+    const request = ++conversationLoad.current
     setSwitchingConversation(true)
+    setConversationError(false)
+    setFailedConversationId(null)
+    conversationId.current = undefined
+    planningRef.current = null
+    setMessages([])
     const { data, error } = await supabase
       .from('jimbot_messages')
       .select('id, role, content, intent, payload')
@@ -141,31 +169,20 @@ export function JimbotChat({ embedded }: { embedded?: boolean }) {
       .order('created_at', { ascending: true })
     if (error) {
       console.error('Jimbot conversation load failed', error)
-      if (isActive()) setConversationError(true)
-      setSwitchingConversation(false)
+      if (isActive() && request === conversationLoad.current) {
+        setConversationError(true)
+        setFailedConversationId(id)
+        setSwitchingConversation(false)
+      }
       return
     }
-    if (!isActive()) return
-    const restored: Msg[] = [welcomeMessage(t)]
-    for (const message of data ?? []) {
-      if (message.intent?.startsWith('feedback_')) continue
-      if (message.role === 'user') {
-        restored.push({ id: message.id, role: 'user', text: message.content })
-      } else {
-        const bot: Record<string, unknown> = { id: message.id, role: 'bot', expression: 'idea', text: message.content }
-        const payload = (message as { payload?: unknown }).payload
-        if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
-          const p = payload as Record<string, unknown>
-          for (const key of STRUCTURED_KEYS) if (p[key] != null) bot[key] = p[key]
-          if (bot.refusal) bot.expression = 'unsure'
-        }
-        restored.push(bot as BotMsg)
-      }
-    }
+    if (!isActive() || request !== conversationLoad.current) return
+    const restored = restoreJimbotConversation(data ?? [], welcomeMessage(t), offlineText(t))
     conversationId.current = id
-    planningRef.current = null
-    setMessages(restored)
+    planningRef.current = restored.planningContext
+    setMessages(restored.messages)
     setConversationError(false)
+    setFailedConversationId(null)
     setSwitchingConversation(false)
     setHistoryOpen(false)
   }
@@ -208,23 +225,27 @@ export function JimbotChat({ embedded }: { embedded?: boolean }) {
   const [share, setShare] = useState<{ title: string } | null>(null)
   const [savedIds, setSavedIds] = useState<Record<string, string>>({})
 
-  const send = async (text: string, opts: { explicitConfirmed?: boolean } = {}) => {
+  const send = async (text: string, opts: { explicitConfirmed?: boolean; retry?: boolean } = {}) => {
     const clean = text.trim().slice(0, MAX_INPUT)
-    if (!clean || thinking) return
+    if (!clean || thinking || historyLoading || historyError || switchingConversation) return
 
     const userMsg: Msg = { id: `u${Date.now()}`, role: 'user', text: clean }
-    // History includes the current user turn.
-    const recent = [...messages.filter((m) => m.id !== 'welcome'), userMsg].slice(-8)
+    // The current turn is sent separately as body.message.
+    const previousMessages = messages.filter((m) => m.id !== 'welcome')
+    let lastUserIndex = previousMessages.length - 1
+    while (lastUserIndex >= 0 && previousMessages[lastUserIndex].role !== 'user') lastUserIndex -= 1
+    const retryHistory = lastUserIndex < 0 ? previousMessages : previousMessages.slice(0, lastUserIndex)
+    const recent = (opts.retry ? retryHistory : previousMessages).slice(-8)
 
-    setMessages((m) => [...m, userMsg])
+    if (!opts.retry) setMessages((m) => [...m, userMsg])
     setInput('')
     setThinking(true)
 
     const pushOffline = (replyText: string) =>
-      setMessages((m) => [...m, { id: `b${Date.now()}`, role: 'bot', expression: 'unsure', text: replyText }])
+      setMessages((m) => [...m, { id: `b${Date.now()}`, role: 'bot', expression: 'unsure', text: replyText, retryText: clean }])
 
     try {
-      await saveMessage('user', clean, 'user')
+      if (!opts.retry) await saveMessage('user', clean, 'user')
 
       if (!online) {
         pushOffline(offlineText(t))
@@ -303,11 +324,13 @@ export function JimbotChat({ embedded }: { embedded?: boolean }) {
 
   const startNewConversation = () => {
     if (thinking || switchingConversation) return
+    conversationLoad.current += 1
     conversationId.current = undefined
     planningRef.current = null
     setMessages([welcomeMessage(t)])
     setInput('')
     setConversationError(false)
+    setFailedConversationId(null)
     setHistoryOpen(false)
   }
 
@@ -364,7 +387,10 @@ export function JimbotChat({ embedded }: { embedded?: boolean }) {
                   ))}
                 </div>
               ) : historyError ? (
-                <p role="alert" className="px-3 py-4 text-sm text-danger">{t('Hindi ma-load ang kasaysayan ng usapan.', "Couldn't load the conversation history.")}</p>
+                <div className="space-y-2 px-3 py-4">
+                  <p role="alert" className="text-sm text-danger">{t('Hindi ma-load ang kasaysayan ng usapan.', "Couldn't load the conversation history.")}</p>
+                  <button type="button" className="text-sm font-medium text-link" onClick={() => setHistoryReload((n) => n + 1)}>{t('Subukan ulit', 'Try again')}</button>
+                </div>
               ) : history.length ? (
                 <ul className="space-y-1">
                   {history.map((conversation) => (
@@ -396,11 +422,23 @@ export function JimbotChat({ embedded }: { embedded?: boolean }) {
             <OfflineState body={t('Kailangan ni Jimbot ng internet para gumawa ng bagong plano. Bukas pa rin ang mga naka-save mong itinerary.', 'Jimbot needs internet to make a new plan. Your saved itineraries are still available.')} />
           ) : (
             <div ref={listRef} className={cn('mx-auto w-full flex-1 space-y-4 px-4 pb-4 pt-4', !embedded && 'max-w-[760px] md:px-6')} aria-live="polite">
-              {switchingConversation ? (
+              {historyLoading ? (
+                <p className="py-8 text-center text-caption text-fg-2" aria-busy="true">{t('Kinukuha ang usapan…', 'Loading your conversation…')}</p>
+              ) : historyError ? (
+                <div className="space-y-2 py-8 text-center">
+                  <p role="alert" className="text-sm text-danger">{t('Hindi ma-load ang kasaysayan ng usapan.', "Couldn't load your conversations.")}</p>
+                  <button type="button" className="text-sm font-medium text-link" onClick={() => setHistoryReload((n) => n + 1)}>{t('Subukan ulit', 'Try again')}</button>
+                </div>
+              ) : switchingConversation ? (
                 <p className="text-center text-caption text-fg-2">{t('Binubuksan ang usapan…', 'Opening conversation…')}</p>
               ) : (
                 <>
-                  {conversationError && <p role="alert" className="text-center text-sm text-danger">{t('Hindi ma-load ang usapan. Subukan itong buksan ulit.', "Couldn't load the conversation. Try opening it again.")}</p>}
+                  {conversationError && (
+                    <div role="alert" className="space-y-2 text-center text-sm text-danger">
+                      <p>{t('Hindi ma-load ang usapan. Subukan itong buksan ulit.', "Couldn't load this conversation. Try again.")}</p>
+                      {failedConversationId && <button type="button" className="font-medium text-link" onClick={() => void openConversation(failedConversationId)}>{t('Subukan ulit', 'Retry')}</button>}
+                    </div>
+                  )}
                   <p className="text-center text-caption text-fg-2">{t('Ngayon', 'Today')}</p>
                   {messages.map((m) =>
                     m.role === 'user' ? (
@@ -412,6 +450,7 @@ export function JimbotChat({ embedded }: { embedded?: boolean }) {
                         showQuickReplies={m.id === lastBotId && !thinking}
                         showFeedback={m.id === lastBotId && !thinking}
                         onPick={send}
+                        onRetry={(text) => void send(text, { retry: true })}
                         onFeedback={(value) => sendFeedback(m.id, value)}
                         onOpenBusiness={(id) => navigate(`/shop/${id}`)}
                         onRefine={(text) => void send(text)}
@@ -463,13 +502,13 @@ export function JimbotChat({ embedded }: { embedded?: boolean }) {
                     onChange={(e) => setInput(e.target.value)}
                     maxLength={MAX_INPUT}
                     placeholder={t('Itanong kay Jimbot…', 'Ask Jimbot…')}
-                    disabled={!online || switchingConversation}
+                    disabled={!online || historyLoading || historyError || switchingConversation}
                     className="h-full min-w-0 flex-1 bg-transparent text-[16px] text-fg placeholder:text-fg-2"
                   />
                   <button
                     type="submit"
                     aria-label={t('Ipadala', 'Send')}
-                    disabled={!input.trim() || thinking || switchingConversation}
+                    disabled={!input.trim() || thinking || historyLoading || historyError || switchingConversation}
                     className="flex h-10 w-10 items-center justify-center rounded-full bg-deep text-white transition-opacity disabled:opacity-40"
                   >
                     <ArrowUp size={20} strokeWidth={2.4} />
@@ -514,6 +553,7 @@ function BotReply({
   showQuickReplies,
   showFeedback,
   onPick,
+  onRetry,
   onFeedback,
   onOpenResult,
   onOpenBusiness,
@@ -531,6 +571,7 @@ function BotReply({
   showQuickReplies: boolean
   showFeedback: boolean
   onPick: (text: string) => void
+  onRetry: (text: string) => void
   onFeedback: (value: 'up' | 'down') => void
   onOpenResult: (result: ChatResult) => void
 }) {
@@ -576,6 +617,11 @@ function BotReply({
           {big && <p className="mb-1 font-display text-[15px] font-semibold text-caution">{t('Hindi ako sigurado', "I'm not sure")}</p>}
           <p className="text-[16px] leading-6">{msg.text}</p>
         </div>
+        {msg.retryText && showQuickReplies && (
+          <button type="button" onClick={() => onRetry(msg.retryText!)} className="inline-flex items-center gap-1.5 rounded-full border border-line px-3 py-1.5 text-sm font-medium text-link hover:bg-surface">
+            <RotateCw size={14} /> {t('Subukan ulit', 'Retry')}
+          </button>
+        )}
         {msg.itineraryDraft?.days?.length ? (
           <div ref={cardRef}>
             <TripItineraryCard

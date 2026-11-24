@@ -4,7 +4,7 @@ All tools return typed errors, never an empty successful result on failure. Comm
 
 ## `search_verified_businesses`
 
-- Purpose: find itinerary candidates.
+- Purpose: find verified places for itinerary planning or a standalone recommendation.
 - Side effects: none. Server query must include `live = true` and `verification_status = 'verified'`.
 - Failure modes: invalid filters, unavailable database, rate limit.
 - Retry: read-safe. Retry transient failures at most twice with backoff; honor `retryAfterMs`.
